@@ -46,5 +46,5 @@ WPF (`net8.0-windows` + x64) 扬声器产线视觉检测平台：Recipe 方案�
 
 ## Git
 
-- 整个项目目录尚未提交（untracked），且还没有本项目自己的 `.gitignore`——首次提交前需忽略 `bin/ obj/ results/`（检测结果 JSON 落在 `results/`；日志在 bin 输出目录 `logs/`，随 bin 一起被忽略）。`启动视觉检测平台.lnk` 由父级 `.gitignore` 的 `*.lnk` 覆盖。
+- 已首次提交（`79d3b91`，含项目 `.gitignore`：忽略 `bin/ obj/ .vs *.user results/ appsettings.json`；检测结果 JSON 落在 `results/`，日志在 bin 输出目录 `logs/` 随 bin 忽略）。`启动视觉检测平台.lnk` 由父级 `.gitignore` 的 `*.lnk` 覆盖。
 - git 仓库根在 `D:\AiProjects`（伞形工作区），`git add` 只加 `speaker-inspection/` 下的显式路径。
