@@ -192,6 +192,32 @@ public class PositionCorrectionTests
     }
 
     [Fact]
+    public void ApplyPoseCorrection_MultipleTargets_AllMapped_NonTargetUnchanged()
+    {
+        // 回归（多修正目标）：targets 含两个节点时，每个目标节点都被映射、非目标原样返回——
+        // 曾有「只有第一个目标节点生效」的现场反馈，钉死多目标语义。
+        var correction = new PoseCorrection("定位", ["检测A", "检测B"], 400, 300, 0, 500, 400, 0);
+
+        var roisA = new List<(string, RoiRect)> { ("检测项", new RoiRect(0.5, 0.5, 0.2, 0.2, 0)) };
+        var mappedA = NodeRois.ApplyPoseCorrection(roisA, "检测A", 1000, 1000, correction);
+        var (_, rectA) = Assert.Single(mappedA);
+        var (ax, ay, _, _, _) = rectA.ToPixels(1000, 1000);
+        Assert.InRange(ax, 599, 601); // (500,500) + (100,100) → (600,600)
+        Assert.InRange(ay, 599, 601);
+
+        var roisB = new List<(string, RoiRect)> { ("检测项", new RoiRect(0.5, 0.5, 0.2, 0.2, 0)) };
+        var mappedB = NodeRois.ApplyPoseCorrection(roisB, "检测B", 1000, 1000, correction);
+        var (_, rectB) = Assert.Single(mappedB);
+        var (bx, by, _, _, _) = rectB.ToPixels(1000, 1000);
+        Assert.InRange(bx, 599, 601);
+        Assert.InRange(by, 599, 601);
+
+        var roisC = new List<(string, RoiRect)> { ("检测项", new RoiRect(0.5, 0.5, 0.2, 0.2, 0)) };
+        var mappedC = NodeRois.ApplyPoseCorrection(roisC, "检测C", 1000, 1000, correction);
+        Assert.Same(roisC, mappedC); // 非目标：原列表原样返回
+    }
+
+    [Fact]
     public void Run_ScalesPassedToContext()
     {
         // scale_x/scale_y 参数非法时回退 1；有效值写入 ctx.PoseCorrection

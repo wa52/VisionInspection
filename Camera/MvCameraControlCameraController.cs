@@ -16,6 +16,7 @@ public sealed class MvCameraControlCameraController : ICameraController
     private const uint TLayerTypeUsb3 = 4;
     private const uint AccessModeExclusive = 1;
     private const int SoftGrabTimeoutMs = 500;
+    private const int SoftPollIntervalMs = 50; // 软触发取帧短轮询间隔：每次持有 _sync ≤50ms，防 UI 读状态被阻塞（卡死）
     private const int GrabPollIntervalMs = 50;
     private const int OpenRetryCount = 3;
     private const int OpenRetryDelayMs = 1000;
@@ -60,6 +61,7 @@ public sealed class MvCameraControlCameraController : ICameraController
     private IoCommunicationSettings _ioCommunicationSettings = new();
     private CameraFloatRange? _gainRange;
     private bool _gammaSupported = true;
+    private double? _resultingFrameRate;
     private bool? _lastTriggerLineStatus;
 
     public MvCameraControlCameraController(string? nativeRuntimeDir)
@@ -160,6 +162,18 @@ public sealed class MvCameraControlCameraController : ICameraController
         }
     }
 
+    /// <summary>相机回读的实际帧率（fps，连接后回读；未连接或相机不支持返回 null）。</summary>
+    public double? ResultingFrameRate
+    {
+        get
+        {
+            lock (_sync)
+            {
+                return _resultingFrameRate;
+            }
+        }
+    }
+
     public event EventHandler<CameraFrameEventArgs>? FrameReceived;
 
     public Task<IReadOnlyList<CameraInfo>> EnumerateAsync(CancellationToken cancellationToken = default)
@@ -183,8 +197,10 @@ public sealed class MvCameraControlCameraController : ICameraController
     public async Task DisconnectAsync(CancellationToken cancellationToken = default)
     {
         cancellationToken.ThrowIfCancellationRequested();
-        await StopPreviewAsync(cancellationToken);
-        await StopHardTriggerAsync(cancellationToken);
+        // 设备层与 UI 无亲和：ConfigureAwait(false) 防止「UI 线程 GetResult 同步等待 + 内部 await 回投 UI 上下文」死锁
+        // （曾导致预览/硬触发激活时关闭软件：Window_Closed 挂死 → 相机不释放 + 弹窗残留桌面）。
+        await StopPreviewAsync(cancellationToken).ConfigureAwait(false);
+        await StopHardTriggerAsync(cancellationToken).ConfigureAwait(false);
 
         lock (_sync)
         {
@@ -289,7 +305,7 @@ public sealed class MvCameraControlCameraController : ICameraController
         // 软/硬触发与连续预览互斥：切换为非连续时先停止预览
         if (mode != CameraTriggerMode.Continuous)
         {
-            await StopPreviewAsync(cancellationToken);
+            await StopPreviewAsync(cancellationToken).ConfigureAwait(false);
         }
 
         await Task.Run(() =>
@@ -320,7 +336,7 @@ public sealed class MvCameraControlCameraController : ICameraController
                         break;
                 }
             }
-        }, cancellationToken);
+        }, cancellationToken).ConfigureAwait(false);
     }
 
     public Task ApplyTriggerSettingsAsync(TriggerSettings settings, CancellationToken cancellationToken = default)
@@ -349,6 +365,10 @@ public sealed class MvCameraControlCameraController : ICameraController
                 _ioCommunicationSettings = CloneIoSettings(settings);
                 if (!_ioCommunicationSettings.Enabled)
                 {
+                    if (_camera is not null && _state == CameraConnectionState.Connected)
+                    {
+                        SetBool("StrobeEnable", false, throwOnError: false);
+                    }
                     return;
                 }
 
@@ -431,6 +451,15 @@ public sealed class MvCameraControlCameraController : ICameraController
             if (ret != 0)
             {
                 AppLog.Warn($"设置输入滤波失败（错误码 {ret}）");
+            }
+        }
+
+        if (settings.BurstFrameCount >= 1)
+        {
+            var ret = _camera.MV_CC_SetIntValue_NET("AcquisitionBurstFrameCount", unchecked((uint)settings.BurstFrameCount));
+            if (ret != 0)
+            {
+                AppLog.Warn($"设置条件触发数失败（错误码 {ret}）");
             }
         }
     }
@@ -675,6 +704,9 @@ public sealed class MvCameraControlCameraController : ICameraController
             cancellationToken.ThrowIfCancellationRequested();
             CameraFrame? converted = null;
 
+            // 快速段（持锁）：校验 + 开始采集。
+            // 不能在持有 _sync 时等帧——GetImageBuffer 阻塞期间 UI 线程读状态
+            // （State/TriggerMode/IsPreviewing）会被一起卡住数秒（重复点击卡死的根源）。
             lock (_sync)
             {
                 if (_camera is null || _state != CameraConnectionState.Connected)
@@ -692,39 +724,64 @@ public sealed class MvCameraControlCameraController : ICameraController
                     throw new InvalidOperationException("连续预览中，请先停止预览再软触发");
                 }
 
-                var ret = _camera.MV_CC_StartGrabbing_NET();
-                if (ret != 0)
+                var startRet = _camera.MV_CC_StartGrabbing_NET();
+                if (startRet != 0)
                 {
-                    throw new InvalidOperationException($"开始采集失败（错误码 {ret}）");
+                    throw new InvalidOperationException($"开始采集失败（错误码 {startRet}）");
                 }
 
-                try
+                var trigRet = _camera.MV_CC_TriggerSoftwareExecute_NET();
+                if (trigRet != 0)
                 {
-                    ret = _camera.MV_CC_TriggerSoftwareExecute_NET();
-                    if (ret != 0)
+                    throw new InvalidOperationException($"软触发失败（错误码 {trigRet}）");
+                }
+            }
+
+            try
+            {
+                // 取帧段（短轮询，对齐 HardTriggerLoop 的防卡死模式）：每次持有 _sync ≤ SoftPollIntervalMs
+                var deadline = Environment.TickCount64 + SoftGrabTimeoutMs;
+                while (true)
+                {
+                    cancellationToken.ThrowIfCancellationRequested();
+                    lock (_sync)
                     {
-                        throw new InvalidOperationException($"软触发失败（错误码 {ret}）");
+                        if (_camera is null || _state != CameraConnectionState.Connected)
+                        {
+                            throw new InvalidOperationException("取帧中相机已断开");
+                        }
+
+                        var frame = new MyCamera.MV_FRAME_OUT();
+                        var ret = _camera.MV_CC_GetImageBuffer_NET(ref frame, SoftPollIntervalMs);
+                        if (ret == 0)
+                        {
+                            try
+                            {
+                                converted = ConvertFrame(_camera, ref frame);
+                            }
+                            finally
+                            {
+                                _camera.MV_CC_FreeImageBuffer_NET(ref frame);
+                            }
+                        }
                     }
 
-                    var frame = new MyCamera.MV_FRAME_OUT();
-                    ret = _camera.MV_CC_GetImageBuffer_NET(ref frame, SoftGrabTimeoutMs);
-                    if (ret != 0)
+                    if (converted is not null)
                     {
-                        throw new InvalidOperationException($"触发后取帧失败（错误码 {ret}）");
+                        break;
                     }
 
-                    try
+                    if (Environment.TickCount64 >= deadline)
                     {
-                        converted = ConvertFrame(_camera, ref frame);
-                    }
-                    finally
-                    {
-                        _camera.MV_CC_FreeImageBuffer_NET(ref frame);
+                        throw new InvalidOperationException($"触发后取帧失败（超时 {SoftGrabTimeoutMs}ms）");
                     }
                 }
-                finally
+            }
+            finally
+            {
+                lock (_sync)
                 {
-                    _camera.MV_CC_StopGrabbing_NET();
+                    _camera?.MV_CC_StopGrabbing_NET();
                 }
             }
 
@@ -1046,7 +1103,15 @@ public sealed class MvCameraControlCameraController : ICameraController
             return;
         }
 
-        SetFloat("ExposureTime", (float)_parameters.ExposureTimeUs);
+        // 自动模式先于数值设置：自动曝光/增益生效时数值节点只读，越序写入只会刷错误码
+        var exposureAuto = NormalizeAutoMode(_parameters.ExposureAuto);
+        SetEnumByString("ExposureAuto", exposureAuto);
+        if (exposureAuto == "Off")
+        {
+            SetFloat("ExposureTime", (float)_parameters.ExposureTimeUs);
+        }
+
+        var gainAuto = NormalizeAutoMode(_parameters.GainAuto);
 
         // 增益按相机回读范围钳制（越界 SDK 返回 MV_E_GC_RANGE，静默失败导致"增益无效"）
         var gain = _parameters.Gain;
@@ -1061,14 +1126,30 @@ public sealed class MvCameraControlCameraController : ICameraController
             }
         }
 
-        SetFloat("Gain", (float)gain);
+        SetEnumByString("GainAuto", gainAuto);
+        if (gainAuto == "Off")
+        {
+            SetFloat("Gain", (float)gain);
+        }
+
         if (_gammaSupported)
         {
             SetFloat("Gamma", (float)_parameters.Gamma);
         }
 
+        if (_parameters.ImageWidth > 0)
+        {
+            SetInt("Width", _parameters.ImageWidth);
+        }
+
+        if (_parameters.ImageHeight > 0)
+        {
+            SetInt("Height", _parameters.ImageHeight);
+        }
+
         if (_parameters.FrameRate > 0)
         {
+            SetBool("AcquisitionFrameRateEnable", true);
             SetFloat("AcquisitionFrameRate", (float)_parameters.FrameRate);
         }
 
@@ -1080,6 +1161,11 @@ public sealed class MvCameraControlCameraController : ICameraController
         }
     }
 
+    private static string NormalizeAutoMode(string? mode) =>
+        string.Equals(mode, "Once", StringComparison.OrdinalIgnoreCase) ? "Once"
+        : string.Equals(mode, "Continuous", StringComparison.OrdinalIgnoreCase) ? "Continuous"
+        : "Off";
+
     /// <summary>连接后回读相机参数能力：增益范围、增益模式、Gamma 可写性。</summary>
     private void ReadParameterCapabilitiesLocked()
     {
@@ -1090,6 +1176,7 @@ public sealed class MvCameraControlCameraController : ICameraController
 
         _gainRange = null;
         _gammaSupported = true;
+        _resultingFrameRate = null;
 
         var fv = new MyCamera.MVCC_FLOATVALUE();
         if (_camera.MV_CC_GetFloatValue_NET("Gain", ref fv) == 0 && fv.fMax > fv.fMin)
@@ -1100,6 +1187,13 @@ public sealed class MvCameraControlCameraController : ICameraController
         else
         {
             AppLog.Warn("无法读取相机增益范围，增益将不做钳制");
+        }
+
+        // 实际帧率（ResultingFrameRate，只读回显；部分相机在触发模式下才有效）
+        var rfv = new MyCamera.MVCC_FLOATVALUE();
+        if (_camera.MV_CC_GetFloatValue_NET("ResultingFrameRate", ref rfv) == 0 && rfv.fCurValue > 0)
+        {
+            _resultingFrameRate = rfv.fCurValue;
         }
 
         // 自动增益（GainMode=Continuous/Once）会覆盖手动增益设置，应用手动增益前需置 Off
@@ -1122,6 +1216,15 @@ public sealed class MvCameraControlCameraController : ICameraController
     private void SetFloat(string key, float value)
     {
         var ret = _camera!.MV_CC_SetFloatValue_NET(key, value);
+        if (ret != 0)
+        {
+            AppLog.Warn($"设置 {key} 失败（错误码 {ret}）");
+        }
+    }
+
+    private void SetInt(string key, int value)
+    {
+        var ret = _camera!.MV_CC_SetIntValue_NET(key, unchecked((uint)value));
         if (ret != 0)
         {
             AppLog.Warn($"设置 {key} 失败（错误码 {ret}）");

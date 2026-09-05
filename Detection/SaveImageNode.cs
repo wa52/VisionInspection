@@ -13,14 +13,14 @@ public sealed class SaveImageNode : IModelNode
     public static readonly IReadOnlyList<ParamDef> StaticParamDefs =
     [
         new ParamDef { Key = "source", Label = "图像来源", Kind = "nodesource", Default = "@input" },
-        new ParamDef { Key = "save_mode", Label = "保存类型", Kind = "choice", Default = "all", Choices = ["all", "ok", "ng"] },
+        new ParamDef { Key = "save_mode", Label = "保存类型", Kind = "choice", Default = "全部", Choices = ["全部", "仅OK", "仅NG"] },
         new ParamDef { Key = "dir", Label = "保存目录", Kind = "folder", Default = @"D:\vision\vm_output" },
     ];
 
     private readonly Dictionary<string, string> _params = new()
     {
         ["source"] = "@input",
-        ["save_mode"] = "all",
+        ["save_mode"] = "全部",
         ["dir"] = @"D:\vision\vm_output",
     };
 
@@ -44,6 +44,22 @@ public sealed class SaveImageNode : IModelNode
     public IReadOnlyDictionary<string, string> Params => _params;
     public void SetParam(string key, string value) => _params[key] = value;
 
+    /// <summary>保存门槛归一化：新配方存中文（全部/仅OK/仅NG），旧配方存 all/ok/ng，两者都接受。</summary>
+    internal static string NormalizeMode(string? mode) => (mode ?? "").Trim() switch
+    {
+        "仅OK" or "ok" => "ok",
+        "仅NG" or "ng" => "ng",
+        _ => "all",
+    };
+
+    /// <summary>保存类型门槛：仅OK=判定 OK 时保存，仅NG=判定 NG 时保存，其余全部保存。YOLO/Seg 整图留存共用。</summary>
+    internal static bool ShouldSave(string? mode, string decision) => NormalizeMode(mode) switch
+    {
+        "ok" => decision == "OK",
+        "ng" => decision == "NG",
+        _ => true,
+    };
+
     public NodeResult Run(Mat bgr, PipelineRunContext ctx)
     {
         var source = _params.TryGetValue("source", out var s) ? s : "@input";
@@ -59,16 +75,15 @@ public sealed class SaveImageNode : IModelNode
         }
 
         var decision = ctx.CurrentDecision;
-        var shouldSave = mode switch
-        {
-            "all" => true,
-            "ok" => decision == "OK",
-            "ng" => decision == "NG",
-            _ => false,
-        };
+        var shouldSave = ShouldSave(mode, decision);
 
-        if (!shouldSave || string.IsNullOrWhiteSpace(dir))
+        if (!shouldSave)
         {
+            return new NodeResult { Decision = "OK", Values = { ["saved"] = "0" } };
+        }
+        if (string.IsNullOrWhiteSpace(dir))
+        {
+            Log?.Invoke($"[SaveImage] {Name}: 未配置「保存目录」(dir)，本次不保存");
             return new NodeResult { Decision = "OK", Values = { ["saved"] = "0" } };
         }
 

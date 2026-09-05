@@ -73,8 +73,10 @@ public sealed class Pipeline : IDisposable
                 case PatchCoreNode pcn: pcn.Log = _log; break;
                 case YoloNode yn: yn.Log = _log; break;
                 case SegNode sg: sg.Log = _log; break;
+                case SemanticSegNode ss: ss.Log = _log; break;
                 case ContourMatchNode cm: cm.Log = _log; break;
                 case PositionCorrectionNode pc: pc.Log = _log; break;
+                case KeyControlNode kc: kc.Log = _log; break;
             }
             _nodes.Add(node);
         }
@@ -97,7 +99,12 @@ public sealed class Pipeline : IDisposable
             foreach (var target in pc.TargetNodes)
             {
                 var targetIdx = _nodes.FindIndex(n => string.Equals(n.Name, target, StringComparison.OrdinalIgnoreCase));
-                if (targetIdx < 0 || targetIdx <= i)
+                if (targetIdx < 0)
+                {
+                    // 引用失效：节点已改名/已删除（target_nodes 残留旧名，勾选面板里也不可见，静默不修正）
+                    _log?.Invoke($"[位置修正] {pc.Name}: 修正目标「{target}」不存在（节点可能已改名或删除），该目标已失效（请在参数面板重新勾选）");
+                }
+                else if (targetIdx <= i)
                 {
                     _log?.Invoke($"[位置修正] {pc.Name}: 修正目标「{target}」不在本节点下游，该节点的 ROI 不会跟随修正（请把它排在位置修正之后）");
                 }
@@ -142,6 +149,10 @@ public sealed class Pipeline : IDisposable
                     sg.EnsureLoaded(_recipe.BaseDir);
                     _log?.Invoke($"[校验] {node.Name}: 模板已加载: {sg.ResolvedModelDir}");
                     break;
+                case SemanticSegNode ss:
+                    ss.EnsureLoaded(_recipe.BaseDir);
+                    _log?.Invoke($"[校验] {node.Name}: 模板已加载: {ss.ResolvedModelDir}");
+                    break;
                 case ContourMatchNode cm:
                     cm.EnsureLoaded(_recipe.BaseDir);
                     _log?.Invoke($"[校验] {node.Name}: 模板已加载: {cm.ResolvedModelDir}");
@@ -150,7 +161,7 @@ public sealed class Pipeline : IDisposable
         }
         catch (Exception ex)
         {
-            var hint = node is YoloNode or SegNode or ContourMatchNode ? "「模型目录」" : "「模型路径」";
+            var hint = node is YoloNode or SegNode or SemanticSegNode or ContourMatchNode ? "「模型目录」" : "「模型路径」";
             _log?.Invoke($"[校验] {node.Name}: 模型加载失败: {ex.Message}（请检查{hint}参数）");
         }
     }
@@ -162,7 +173,6 @@ public sealed class Pipeline : IDisposable
         Mat bgr,
         string imageName,
         string? vmSource = null,
-        IoCommunicationSettings? cameraIoSettings = null,
         Action<IoCommunicationSettings>? cameraIoOutput = null,
         IReadOnlyDictionary<string, Mat>? sourceOverrides = null)
     {
@@ -172,7 +182,7 @@ public sealed class Pipeline : IDisposable
             ProcessedAt = DateTime.Now.ToString("yyyy-MM-ddTHH:mm:ss.fff"),
         };
         _nodeFailed = false;
-        var ctx = new PipelineRunContext(bgr, cameraIoSettings, cameraIoOutput);
+        var ctx = new PipelineRunContext(bgr, cameraIoOutput);
         if (sourceOverrides is not null)
         {
             foreach (var (name, mat) in sourceOverrides)
@@ -210,7 +220,9 @@ public sealed class Pipeline : IDisposable
             }
             try
             {
+                var sw = System.Diagnostics.Stopwatch.StartNew();
                 var nr = node.Run(bgr, ctx);
+                nr.Values["elapsed_ms"] = sw.Elapsed.TotalMilliseconds.ToString("F2");
                 if (!string.IsNullOrWhiteSpace(nr.Decision) && !nr.Values.ContainsKey("decision"))
                 {
                     nr.Values["decision"] = nr.Decision;
@@ -280,7 +292,6 @@ public sealed class Pipeline : IDisposable
         IReadOnlyDictionary<string, Mat> nodeInputs,
         string imageName,
         IReadOnlySet<string>? requiredModelNodes = null,
-        IoCommunicationSettings? cameraIoSettings = null,
         Action<IoCommunicationSettings>? cameraIoOutput = null)
     {
         var result = new PipelineResult
@@ -289,7 +300,7 @@ public sealed class Pipeline : IDisposable
             ProcessedAt = DateTime.Now.ToString("yyyy-MM-ddTHH:mm:ss.fff"),
         };
         _nodeFailed = false;
-        var ctx = new PipelineRunContext(nodeInputs.Values.FirstOrDefault() ?? new Mat(), cameraIoSettings, cameraIoOutput);
+        var ctx = new PipelineRunContext(nodeInputs.Values.FirstOrDefault() ?? new Mat(), cameraIoOutput);
         var skippedNodes = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
 
         // 阶段1：所有启用的模型节点并发执行（节点间无依赖，各自独立 runtime，线程安全）。
@@ -331,7 +342,9 @@ public sealed class Pipeline : IDisposable
                 {
                     try
                     {
+                        var sw = System.Diagnostics.Stopwatch.StartNew();
                         var nr = t.Node.Run(t.Input, ctx);
+                        nr.Values["elapsed_ms"] = sw.Elapsed.TotalMilliseconds.ToString("F2");
                         if (!string.IsNullOrWhiteSpace(nr.Decision) && !nr.Values.ContainsKey("decision"))
                         {
                             nr.Values["decision"] = nr.Decision;
@@ -386,7 +399,9 @@ public sealed class Pipeline : IDisposable
 
             try
             {
+                var sw = System.Diagnostics.Stopwatch.StartNew();
                 var nr = node.Run(ctx.Input, ctx);
+                nr.Values["elapsed_ms"] = sw.Elapsed.TotalMilliseconds.ToString("F2");
                 if (!string.IsNullOrWhiteSpace(nr.Decision) && !nr.Values.ContainsKey("decision"))
                 {
                     nr.Values["decision"] = nr.Decision;
@@ -471,7 +486,7 @@ public sealed class Pipeline : IDisposable
 
     private static bool IsModelNode(IModelNode node) =>
         node is not DecisionNode and not SaveImageNode and not DisplayNode and not CameraIoNode
-        and not ImageSourceNode and not BinarizeNode and not GeometryNode;
+        and not ImageSourceNode and not BinarizeNode and not GeometryNode and not KeyControlNode;
 
     /// <summary>
     /// 构建期校验节点引用（只记日志，不阻断）：source/条件引用的节点不存在、

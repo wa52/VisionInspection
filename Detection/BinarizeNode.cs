@@ -21,8 +21,8 @@ public sealed class BinarizeNode : IModelNode
             Key = "type",
             Label = "二值化类型",
             Kind = "choice",
-            Default = "Binary",
-            Choices = ["Binary", "BinaryInv", "Truncate", "Tozero", "TozeroInv"],
+            Default = "二值化",
+            Choices = ["二值化", "反二值化", "截断", "低于阈值归零", "高于阈值归零"],
         },
         new ParamDef { Key = "otsu", Label = "Otsu自动阈值", Kind = "bool", Default = "false" },
     ];
@@ -32,7 +32,7 @@ public sealed class BinarizeNode : IModelNode
         ["source"] = "@input",
         ["threshold"] = "128",
         ["maxval"] = "255",
-        ["type"] = "Binary",
+        ["type"] = "二值化",
         ["otsu"] = "false",
     };
 
@@ -123,12 +123,14 @@ public sealed class BinarizeNode : IModelNode
     private static double ParseDouble(string? raw, double fallback) =>
         double.TryParse(raw, out var v) ? v : fallback;
 
-    private static ThresholdTypes ParseType(string? raw) => raw switch
+    /// <summary>归一化二值化类型：新配方存中文，旧配方存 OpenCV 英文名，两者都接受。</summary>
+    private static ThresholdTypes ParseType(string? raw) => raw?.Trim() switch
     {
-        "BinaryInv" => ThresholdTypes.BinaryInv,
-        "Truncate" => ThresholdTypes.Trunc,
-        "Tozero" => ThresholdTypes.Tozero,
-        "TozeroInv" => ThresholdTypes.TozeroInv,
+        "反二值化" or "BinaryInv" => ThresholdTypes.BinaryInv,
+        "截断" or "Truncate" => ThresholdTypes.Trunc,
+        "低于阈值归零" or "Tozero" => ThresholdTypes.Tozero,
+        "高于阈值归零" or "TozeroInv" => ThresholdTypes.TozeroInv,
+        "二值化" or "Binary" => ThresholdTypes.Binary,
         _ => ThresholdTypes.Binary,
     };
 

@@ -39,6 +39,9 @@ public interface ICameraController : IDisposable
     /// <summary>Gamma 节点是否可写（连接后探测；未连接默认 true）。</summary>
     bool GammaSupported { get; }
 
+    /// <summary>相机回读的实际帧率（fps，连接后回读；未连接或相机不支持返回 null）。</summary>
+    double? ResultingFrameRate { get; }
+
     /// <summary>是否正在硬触发采集（等待 PLC 触发）。</summary>
     bool IsHardTriggering { get; }
 

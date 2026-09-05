@@ -13,7 +13,7 @@ namespace SpeakerVisionInspection.Tests;
 /// </summary>
 public class NodeLifecycleTests
 {
-    public static TheoryData<string> LifecycleTypes => new() { "YOLO", "Seg" };
+    public static TheoryData<string> LifecycleTypes => new() { "YOLO", "Seg", "SemanticSeg" };
 
     [Theory]
     [MemberData(nameof(LifecycleTypes))]

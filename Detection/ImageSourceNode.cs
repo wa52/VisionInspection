@@ -8,8 +8,9 @@ namespace SpeakerVisionInspection.Detection;
 /// 图像源节点：流程的图像来源，支持两种模式（source_kind）。
 /// - 图像文件：dir 非空走序列模式（按文件名排序，每次运行取下一张，loop=true 循环；false 停在最后一张）；
 ///   否则走单图模式（path，每次运行读同一张）。中文路径用字节流 ImDecode 兜底。
-/// - 相机：输入帧非空（硬触发生产）直接透传；输入为空（单次/连续执行）通过 FrameProvider 同步抓一帧。
-/// 不参与判定（恒 OK）；取不到图输出空并记日志。
+/// - 相机：输入帧非空（硬触发生产）直接透传；输入为空（单次/连续执行）通过 FrameProvider 同步抓一帧；
+///   取不到帧（未连接/硬触发阻断/超时/异常）→ 节点 ERROR 停线（无图不能判定，不静默漏输出）。
+/// 不参与判定（取到图恒 OK）；文件模式取不到图输出空并记日志。
 /// </summary>
 public sealed class ImageSourceNode : IModelNode
 {
@@ -79,7 +80,10 @@ public sealed class ImageSourceNode : IModelNode
         return string.Equals(kind, "相机", StringComparison.Ordinal) ? RunCamera(bgr) : RunFile();
     }
 
-    /// <summary>相机模式：输入帧非空 → 透传（生产/已有真实帧）；为空 → FrameProvider 同步抓一帧。</summary>
+    /// <summary>
+    /// 相机模式：输入帧非空 → 透传（生产/已有真实帧）；为空 → FrameProvider 同步抓一帧。
+    /// 取不到帧（未连接/硬触发阻断/超时/异常）→ 节点 ERROR 停线，不静默漏输出（对齐相机IO节点语义）。
+    /// </summary>
     private NodeResult RunCamera(Mat bgr)
     {
         if (bgr is not null && !bgr.Empty())
@@ -90,8 +94,7 @@ public sealed class ImageSourceNode : IModelNode
         var provider = FrameProvider;
         if (provider == null)
         {
-            Log?.Invoke($"[ImageSource] {Name}: 相机未连接，取不到帧");
-            return new NodeResult { Decision = "OK" };
+            return Fail("相机未连接：请打开「相机管理」连接相机后再执行");
         }
 
         var waitMs = int.TryParse(_params.GetValueOrDefault("cam_wait_ms"), out var w) && w > 0 ? w : 3000;
@@ -102,18 +105,24 @@ public sealed class ImageSourceNode : IModelNode
         }
         catch (Exception ex)
         {
-            Log?.Invoke($"[ImageSource] {Name}: 相机取帧失败: {ex.Message}");
-            return new NodeResult { Decision = "OK" };
+            return Fail($"相机取帧失败: {ex.Message}");
         }
 
         if (img == null || img.Empty())
         {
             img?.Dispose();
-            Log?.Invoke($"[ImageSource] {Name}: 相机取帧超时（{waitMs}ms），输出为空");
-            return new NodeResult { Decision = "OK" };
+            return Fail($"相机取帧失败（详见日志）：相机可能未连接、处于硬触发模式或取帧超时（{waitMs}ms）。"
+                + "硬触发模式下单次/连续执行不抓帧（防干扰生产采集）——请在「相机管理」把触发模式改为连续/软触发，或把图像源切回图像文件");
         }
 
         return ImageResult(img, "CAMERA");
+    }
+
+    /// <summary>相机取帧失败 → 节点 ERROR（结果表格/模块结果可见，整线停线）。</summary>
+    private NodeResult Fail(string error)
+    {
+        Log?.Invoke($"[ImageSource] {Name}: {error}");
+        return new NodeResult { Decision = "ERROR", Error = error };
     }
 
     private NodeResult RunFile()

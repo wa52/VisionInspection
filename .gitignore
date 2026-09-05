@@ -6,3 +6,6 @@ obj/
 results/
 # 本机配置（exe 同目录时随 bin/ 忽略，此处兜底项目根）
 appsettings.json
+# 临时草稿文件与 AI 会话导出，不随仓库
+.scratch
+opencode.md

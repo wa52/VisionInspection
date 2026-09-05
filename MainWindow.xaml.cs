@@ -17,6 +17,7 @@ using Point = System.Windows.Point;
 using OpenCvSharp;
 using System.Runtime.InteropServices;
 using SpeakerVisionInspection.Camera;
+using SpeakerVisionInspection.Comm;
 using SpeakerVisionInspection.Detection;
 using SpeakerVisionInspection.Models;
 using SpeakerVisionInspection.Production;
@@ -46,7 +47,8 @@ public partial class MainWindow : WpfWindow
 
 	private CameraInfo? _selectedCamera;
 
-	private bool _isParameterEditInProgress;
+	/// <summary>「按键控制」节点绑定的触发键位（空闲时按下 = 执行一次完整检测流程）。</summary>
+	private readonly HashSet<Key> _keyTriggerKeys = new();
 
 	private Dictionary<string, TextBox> _paramBoxes;
 
@@ -68,6 +70,9 @@ public partial class MainWindow : WpfWindow
 
 	/// <summary>最近一次执行的节点结果值（位置修正「设置基准位姿」读取 loc_* 用）。</summary>
 	private IReadOnlyDictionary<string, Dictionary<string, string>>? _lastNodeValues;
+
+	/// <summary>模块结果历史（海康式：每节点最近 N 次执行记录，供模块弹窗「模块结果/当前结果/历史结果」展示）。</summary>
+	private readonly ModuleResultHistory _moduleHistory = new();
 
 	private bool _thumbStripVisible;
 
@@ -104,6 +109,20 @@ public partial class MainWindow : WpfWindow
 	/// <summary>打开中的检测项管理弹窗（图像点选反向同步列表选中）。</summary>
 	private RoiManagerDialog? _roiManager;
 
+	/// <summary>方案编辑历史（撤销/重做）：Recipe JSON 快照栈；_lastSnapshot=距上次快照点之前的状态（惰性捕获，变更入口调用 PushUndoSnapshot 时仍是变更前状态）。</summary>
+	private readonly Stack<string> _undoStack = new();
+	private readonly Stack<string> _redoStack = new();
+	private string _lastSnapshot = "";
+	private bool _restoringSnapshot;
+	private const int MaxUndoSteps = 50;
+
+	/// <summary>方案锁定（工具栏挂锁）：开启时 ROI 几何与节点结构不可修改（防误触），参数数值仍可调整。运行时状态，不持久化。</summary>
+	private bool _uiLocked;
+
+	/// <summary>连续执行图标几何（空闲=循环箭头 / 运行中=停止方块，UpdateButtonState 切换）。</summary>
+	private const string IconContinuousData = "M21,4 L21,10 L15,10 M19.6,15 A8,8 0 1 1 17.7,6.6 L21,10";
+	private const string IconStopData = "M7,7 L17,7 L17,17 L7,17 Z";
+
 	/// <summary>重绘目标检测项索引（>=0 时下一次画框替换该条目几何、名字保留；画完自动清零）。</summary>
 	private int _redrawTargetIndex = -1;
 
@@ -132,8 +151,10 @@ public partial class MainWindow : WpfWindow
 		["CameraIo"] = "相机IO通信",
 		["YOLO"] = "目标检测",
 		["Seg"] = "实例分割",
+		["SemanticSeg"] = "语义分割",
 		["ContourMatch"] = "轮廓匹配",
 		["PositionCorrection"] = "位置修正",
+		["KeyControl"] = "按键控制",
 		["OCR"] = "OCR 识别（未实现）"
 	};
 
@@ -158,6 +179,7 @@ public partial class MainWindow : WpfWindow
 		_roiPolys = new List<(RecipeRoi Roi, Polygon Poly, bool Own, int OwnIndex)>();
 		_roiHandleRects = new List<Rectangle>();
 		InitializeComponent();
+		CheckCameraRuntime();
 		_runner = new PipelineRunner();
 		_runner.StateChanged += delegate
 		{
@@ -190,6 +212,22 @@ public partial class MainWindow : WpfWindow
 		UpdateButtonState();
 	}
 
+	private void CheckCameraRuntime()
+	{
+		var config = VisionMasterConfigResolver.ResolveFromProcessEnvironment(System.IO.Path.Combine(ConfigDir, "appsettings.json"));
+		var result = EnvironmentCheckService.Check(config, Environment.Is64BitProcess, ConfigDir);
+		var failed = result.Items.Where(i => !i.Ok).ToList();
+		StatusSdk.Text = failed.Count == 0 ? "MVS: 就绪（无需 VisionMaster 加密狗）" : "MVS: 相机运行时缺失";
+		if (failed.Count > 0)
+		{
+			AppendLog("[环境] 相机功能不可用：" + string.Join("；", failed.Select(i => $"{i.Name}: {i.Detail}")));
+		}
+		else
+		{
+			AppendLog("[环境] MVS 相机运行时检查通过（独立模式，无需 VisionMaster 加密狗）");
+		}
+	}
+
 	private void OnRunnerCompleted(PipelineResult result)
 	{
 		PipelineResult pendingResult;
@@ -202,9 +240,20 @@ public partial class MainWindow : WpfWindow
 		{
 			return;
 		}
+		// 跳过未渲染的上一轮结果：释放其节点图。Mat 可能与渲染侧共享，逐个容错，
+		// 防止后台线程释放时与 UI 渲染竞态导致 ObjectDisposedException 崩掉回调。
 		foreach (Mat value in pendingResult.NodeImages.Values)
 		{
-			value.Dispose();
+			try
+			{
+				if (!value.IsDisposed)
+				{
+					value.Dispose();
+				}
+			}
+			catch (ObjectDisposedException)
+			{
+			}
 		}
 		pendingResult.NodeImages.Clear();
 	}
@@ -219,7 +268,15 @@ public partial class MainWindow : WpfWindow
 		}
 		if (pendingResult != null)
 		{
-			ShowExecutionResult(pendingResult);
+			try
+			{
+				ShowExecutionResult(pendingResult);
+			}
+			catch (ObjectDisposedException ex)
+			{
+				// 渲染链路中访问到已被释放的 Mat：丢弃本轮剩余渲染，记日志，不允许异常打断渲染定时器
+				AppendLog("[显示] 渲染结果时图像已被释放，本轮已跳过: " + ex.Message);
+			}
 		}
 	}
 
@@ -243,6 +300,7 @@ public partial class MainWindow : WpfWindow
 		RecipeCombo.Text = _recipe.Name;
 		RefreshNodeTree();
 		AppendLog("方案已加载: " + _recipe.Name);
+		ResetEditHistory();
 		string environmentVariable = Environment.GetEnvironmentVariable("DEPLOY_MODEL_DIR");
 		if (!string.IsNullOrWhiteSpace(environmentVariable))
 		{
@@ -271,241 +329,7 @@ public partial class MainWindow : WpfWindow
 		return new MvCameraControlCameraController(visionMasterConfig.MvsRuntimeDir);
 	}
 
-	private void BtnRefreshCamera_Click(object sender, RoutedEventArgs e)
-	{
-		RefreshCameraListAsync();
-	}
-
-	private async Task RefreshCameraListAsync()
-	{
-		if (_camera == null)
-		{
-			_camera = CreateCamera();
-			_camera.FrameReceived += Camera_FrameReceived;
-		}
-		CameraList.IsEnabled = false;
-		try
-		{
-			AppendLog("正在枚举相机...");
-			IReadOnlyList<CameraInfo> cameras = await _camera.EnumerateAsync();
-			CameraList.ItemsSource = cameras;
-			AppendLog($"枚举完成，发现 {cameras.Count} 台相机");
-			StatusCamera.Text = ((cameras.Count == 0) ? "相机: 未发现相机" : $"相机: {cameras.Count} 台");
-		}
-		catch (Exception ex)
-		{
-			Exception ex2 = ex;
-			AppendLog("枚举相机失败: " + ex2.Message);
-			MessageBox.Show("枚举相机失败: " + ex2.Message, "相机枚举", MessageBoxButton.OK, MessageBoxImage.Exclamation);
-		}
-		finally
-		{
-			CameraList.IsEnabled = true;
-			UpdateButtonState();
-		}
-	}
-
-	private void CameraList_SelectionChanged(object sender, SelectionChangedEventArgs e)
-	{
-		_selectedCamera = CameraList.SelectedItem as CameraInfo;
-		UpdateButtonState();
-	}
-
-	private async void TriggerModeBox_SelectionChanged(object sender, SelectionChangedEventArgs e)
-	{
-		if (_isParameterEditInProgress)
-		{
-			return;
-		}
-		int selectedIndex = TriggerModeBox.SelectedIndex;
-		if (1 == 0)
-		{
-		}
-		CameraTriggerMode cameraTriggerMode = selectedIndex switch
-		{
-			1 => CameraTriggerMode.Software, 
-			2 => CameraTriggerMode.Hardware, 
-			_ => CameraTriggerMode.Continuous, 
-		};
-		if (1 == 0)
-		{
-		}
-		CameraTriggerMode mode = cameraTriggerMode;
-		ICameraController? camera = _camera;
-		if (camera != null && camera.State == CameraConnectionState.Connected)
-		{
-			try
-			{
-				await _camera.SetTriggerModeAsync(mode);
-				AppendLog($"触发模式已切换: {mode}");
-			}
-			catch (Exception ex)
-			{
-				Exception ex2 = ex;
-				AppendLog("切换触发模式失败: " + ex2.Message);
-			}
-		}
-		UpdateButtonState();
-	}
-
-	private async void BtnConnect_Click(object sender, RoutedEventArgs e)
-	{
-		if ((object)_selectedCamera == null || _camera == null)
-		{
-			MessageBox.Show("请先选择一台相机", "连接相机", MessageBoxButton.OK, MessageBoxImage.Asterisk);
-			return;
-		}
-		BtnConnect.IsEnabled = false;
-		try
-		{
-			AppendLog($"正在连接: {_selectedCamera.DisplayName} ({_selectedCamera.SerialNumber})");
-			await _camera.ConnectAsync(_selectedCamera);
-			AppendLog("连接成功");
-			StatusCamera.Text = "相机: 已连接 " + _selectedCamera.DisplayName;
-			_store = new CameraParameterStore(System.IO.Path.Combine(ConfigDir, "camera.json"));
-			LoadParameterValuesFromStore();
-			await ApplyParametersAsync();
-			int selectedIndex = TriggerModeBox.SelectedIndex;
-			if (1 == 0)
-			{
-			}
-			CameraTriggerMode cameraTriggerMode = selectedIndex switch
-			{
-				1 => CameraTriggerMode.Software, 
-				2 => CameraTriggerMode.Hardware, 
-				_ => CameraTriggerMode.Continuous, 
-			};
-			if (1 == 0)
-			{
-			}
-			CameraTriggerMode mode = cameraTriggerMode;
-			await _camera.SetTriggerModeAsync(mode);
-			AppendLog("触发模式: " + TriggerModeBox.Text);
-		}
-		catch (Exception ex)
-		{
-			Exception ex2 = ex;
-			AppendLog("连接失败: " + ex2.Message);
-			MessageBox.Show("连接失败: " + ex2.Message, "连接相机", MessageBoxButton.OK, MessageBoxImage.Hand);
-		}
-		finally
-		{
-			UpdateButtonState();
-		}
-	}
-
-	private async void BtnDisconnect_Click(object sender, RoutedEventArgs e)
-	{
-		BtnDisconnect.IsEnabled = false;
-		try
-		{
-			PipelineRunner r = _runner;
-			if (r?.IsRunning ?? false)
-			{
-				await r.StopAsync();
-			}
-			ICameraController cam = _camera;
-			if (cam != null)
-			{
-				await cam.StopPreviewAsync();
-				await cam.DisconnectAsync();
-			}
-			AppendLog("已断开");
-			StatusCamera.Text = "相机: 未连接";
-			ResultImage.Source = null;
-			ResultCaption.Text = "执行结果";
-		}
-		catch (Exception ex)
-		{
-			Exception ex2 = ex;
-			AppendLog("断开失败: " + ex2.Message);
-		}
-		finally
-		{
-			UpdateButtonState();
-		}
-	}
-
-	private async void BtnStartPreview_Click(object sender, RoutedEventArgs e)
-	{
-		try
-		{
-			if (_camera == null)
-			{
-				return;
-			}
-			PipelineRunner r = _runner;
-			if (r?.IsRunning ?? false)
-			{
-				await r.StopAsync();
-			}
-			if (_camera.TriggerMode != CameraTriggerMode.Continuous)
-			{
-				await _camera.SetTriggerModeAsync(CameraTriggerMode.Continuous);
-				_isParameterEditInProgress = true;
-				try
-				{
-					TriggerModeBox.SelectedIndex = 0;
-				}
-				finally
-				{
-					_isParameterEditInProgress = false;
-				}
-				AppendLog("触发模式已切换: Continuous");
-			}
-			await _camera.StartPreviewAsync();
-			AppendLog("预览已开始");
-		}
-		catch (Exception ex)
-		{
-			Exception ex2 = ex;
-			AppendLog("开始预览失败: " + ex2.Message);
-		}
-		finally
-		{
-			UpdateButtonState();
-		}
-	}
-
-	private async void BtnSoftTrigger_Click(object sender, RoutedEventArgs e)
-	{
-		try
-		{
-			if (_camera != null)
-			{
-				await _camera.SoftTriggerAsync();
-			}
-		}
-		catch (Exception ex)
-		{
-			Exception ex2 = ex;
-			AppendLog("软触发失败: " + ex2.Message);
-		}
-	}
-
-	private async void BtnStopPreview_Click(object sender, RoutedEventArgs e)
-	{
-		try
-		{
-			if (_camera != null)
-			{
-				await _camera.StopPreviewAsync();
-				AppendLog("预览已停止");
-			}
-		}
-		catch (Exception ex)
-		{
-			Exception ex2 = ex;
-			AppendLog("停止预览失败: " + ex2.Message);
-		}
-		finally
-		{
-			UpdateButtonState();
-		}
-	}
-
-	private void Camera_FrameReceived(object? sender, CameraFrameEventArgs e)
-	{
+	private void Camera_FrameReceived(object? sender, CameraFrameEventArgs e)	{
 		PipelineRunner runner = _runner;
 		if (runner != null && runner.IsRunning)
 		{
@@ -537,7 +361,7 @@ public partial class MainWindow : WpfWindow
 		}
 		try
 		{
-			await _runner.RunOnceAsync(_pipeline, $"EXEC_{DateTime.Now:yyyyMMdd_HHmmss_fff}", ReadCameraIoSettings(), CameraIoOutput);
+			await _runner.RunOnceAsync(_pipeline, $"EXEC_{DateTime.Now:yyyyMMdd_HHmmss_fff}", CameraIoOutputOrNull());
 		}
 		catch (Exception ex)
 		{
@@ -560,7 +384,7 @@ public partial class MainWindow : WpfWindow
 			}
 			try
 			{
-				_runner.StartContinuous(_pipeline, () => $"EXEC_{DateTime.Now:yyyyMMdd_HHmmss_fff}", ReadCameraIoSettings(), CameraIoOutput);
+				_runner.StartContinuous(_pipeline, () => $"EXEC_{DateTime.Now:yyyyMMdd_HHmmss_fff}", CameraIoOutputOrNull());
 				AppendLog("连续执行已开始，点「停止执行」结束");
 			}
 			catch (Exception ex)
@@ -635,10 +459,11 @@ public partial class MainWindow : WpfWindow
 		return true;
 	}
 
-	private IoCommunicationSettings? ReadCameraIoSettings()
+	/// <summary>相机 IO 输出执行器：相机已连接时返回真实执行器；未连接返回 null（CameraIo 节点将 ERROR 停线，防止静默漏输出）。</summary>
+	private Action<IoCommunicationSettings>? CameraIoOutputOrNull()
 	{
 		ICameraController? camera = _camera;
-		return (camera != null && camera.State == CameraConnectionState.Connected) ? ReadIoCommunicationSettingsFromUi() : null;
+		return (camera != null && camera.State == CameraConnectionState.Connected) ? CameraIoOutput : null;
 	}
 
 	private void CameraIoOutput(IoCommunicationSettings settings)
@@ -676,6 +501,12 @@ public partial class MainWindow : WpfWindow
 			NodeDetails = result.NodeValues
 		});
 		_lastNodeValues = result.NodeValues;
+		// 模块结果历史：按节点记录本轮输出（供「模块结果」页签），并刷新右侧面板当前选中节点的结果
+		foreach (var (nodeName, nodeVals) in result.NodeValues)
+		{
+			_moduleHistory.Record(nodeName, nodeVals);
+		}
+		RefreshInspectorModuleResult();
 		while (ResultGrid.Items.Count > 200)
 		{
 			ResultGrid.Items.RemoveAt(ResultGrid.Items.Count - 1);
@@ -693,13 +524,42 @@ public partial class MainWindow : WpfWindow
 		finalVerdictText.Foreground = foreground;
 		_thumbImages.Clear();
 		_nodeAnnotations.Clear();
+		// 同一 Mat 实例可能在多个节点键下共享（透传/复用）：按引用去重，转换一次、多次复用、最后只释放一次；
+		// 单个 Mat 失败（已被释放等）只跳过该图，不中断整轮渲染
+		var convertedMats = new System.Collections.Generic.Dictionary<Mat, BitmapSource?>(System.Collections.Generic.ReferenceEqualityComparer.Instance);
 		foreach (var (key, mat2) in result.NodeImages)
 		{
-			BitmapSource bitmapSource = MatToBitmap(mat2);
-			mat2.Dispose();
-			if (bitmapSource != null)
+			try
 			{
-				_thumbImages[key] = bitmapSource;
+				if (mat2.IsDisposed)
+				{
+					continue;
+				}
+				if (!convertedMats.TryGetValue(mat2, out var bitmapSource))
+				{
+					bitmapSource = MatToBitmap(mat2);
+					convertedMats[mat2] = bitmapSource;
+				}
+				if (bitmapSource != null)
+				{
+					_thumbImages[key] = bitmapSource;
+				}
+			}
+			catch (ObjectDisposedException)
+			{
+			}
+		}
+		foreach (var mat2 in convertedMats.Keys)
+		{
+			try
+			{
+				if (!mat2.IsDisposed)
+				{
+					mat2.Dispose();
+				}
+			}
+			catch (ObjectDisposedException)
+			{
 			}
 		}
 		foreach (var (key, shapes) in result.NodeAnnotations)
@@ -741,6 +601,7 @@ public partial class MainWindow : WpfWindow
 
 	internal void ToggleRoiDraw(RecipeNode rn, NodeParamDialog dialog)
 	{
+		if (!EnsureUnlocked("进入绘制模式")) return;
 		if (_roiDrawMode && _roiDrawNode == rn)
 		{
 			ExitRoiDrawMode();
@@ -1162,7 +1023,7 @@ public partial class MainWindow : WpfWindow
 		if (_roiDrawMode && _roiDrawNode != null)
 		{
 			return _recipe.Nodes.FirstOrDefault((RecipeNode n) => string.Equals(n.Name, _roiDrawNode.Name, StringComparison.OrdinalIgnoreCase)
-				&& n.Type is "PatchCore" or "YOLO" or "Seg" or "ContourMatch");
+				&& n.Type is "PatchCore" or "YOLO" or "Seg" or "SemanticSeg" or "ContourMatch");
 		}
 		if (string.IsNullOrWhiteSpace(_selectedThumbName))
 		{
@@ -1170,7 +1031,7 @@ public partial class MainWindow : WpfWindow
 		}
 		return _recipe.Nodes.FirstOrDefault((RecipeNode n) =>
 			string.Equals(n.Name, _selectedThumbName, StringComparison.OrdinalIgnoreCase)
-			&& n.Type is "PatchCore" or "YOLO" or "Seg" or "ContourMatch");
+			&& n.Type is "PatchCore" or "YOLO" or "Seg" or "SemanticSeg" or "ContourMatch");
 	}
 
 	/// <summary>
@@ -1197,6 +1058,7 @@ public partial class MainWindow : WpfWindow
 	/// <summary>own_rois 的写回辅助：更新节点私有 ROI 集（覆盖式）并热生效（不含元数据，旧格式）。</summary>
 	private void WriteOwnRois(RecipeNode rn, List<(string Name, RoiRect Rect)> rois)
 	{
+		if (!EnsureUnlocked("修改检测区域")) return;
 		rn.Params["own_rois"] = NodeRois.SerializeOwn(rois);
 		HotApplyParam(rn, "own_rois", rn.Params["own_rois"]);
 	}
@@ -1204,6 +1066,7 @@ public partial class MainWindow : WpfWindow
 	/// <summary>own_rois 的写回辅助（含检测项元数据，覆盖式热生效）。</summary>
 	private void WriteOwnRoisFull(RecipeNode rn, List<RoiItem> items)
 	{
+		if (!EnsureUnlocked("修改检测区域")) return;
 		rn.Params["own_rois"] = NodeRois.SerializeOwnFull(items);
 		HotApplyParam(rn, "own_rois", rn.Params["own_rois"]);
 	}
@@ -1213,6 +1076,7 @@ public partial class MainWindow : WpfWindow
 	{
 		"YOLO" => YoloNode.DefaultConf,
 		"Seg" => SegNode.DefaultPercent,
+		"SemanticSeg" => SemanticSegNode.DefaultPercent,
 		"PatchCore" => ReadModelThreshold(rn)?.ToString("F4") ?? "0.5",
 		_ => "",
 	};
@@ -1220,6 +1084,7 @@ public partial class MainWindow : WpfWindow
 	/// <summary>设置选中检测项的元数据（检测项管理弹窗编辑用，索引定位，热生效）。</summary>
 	internal void SetRoiMeta(RecipeNode rn, int index, RoiMeta meta)
 	{
+		if (!EnsureUnlocked("修改检测项参数")) return;
 		var items = NodeRois.ParseOwnFull(rn.Params.GetValueOrDefault("own_rois"));
 		if (index < 0 || index >= items.Count) return;
 		items[index] = items[index] with { Meta = meta };
@@ -1280,8 +1145,8 @@ public partial class MainWindow : WpfWindow
 		}
 		var (visible, ownMode) = VisibleRois();
 		_previewHits.Clear();
-		// 画布交互：绘制模式（画新框/编辑）或当前节点有可编辑 ROI 时启用
-		RoiCanvas.IsHitTestVisible = _roiDrawMode || visible.Count > 0;
+		// 画布交互：锁定时禁用（防误触）；否则绘制模式（画新框/编辑）或有可编辑 ROI 时启用
+		RoiCanvas.IsHitTestVisible = !_uiLocked && (_roiDrawMode || visible.Count > 0);
 		// 位置修正预览：当前节点被修正时，非绘制模式只显示修正后的框（青色虚线）；选中项才显示原始框+手柄供编辑
 		var previewNode2 = FindDisplayedModelNode();
 		var preview = previewNode2 is null ? null : BuildPreviewCorrection(previewNode2);
@@ -1605,6 +1470,7 @@ public partial class MainWindow : WpfWindow
 	/// <summary>节点检测项（own_rois）：新建默认居中项（自动递增命名，预填节点类型默认阈值）。</summary>
 	internal void AddOwnRoi(RecipeNode rn)
 	{
+		if (!EnsureUnlocked("新建检测项")) return;
 		var items = NodeRois.ParseOwnFull(rn.Params.GetValueOrDefault("own_rois"));
 		var name = NodeRois.UniqueOwnName(items.Select(i => (i.Name, i.Rect)).ToList(), "检测项");
 		items.Add(new RoiItem(name, new RoiRect(0.5, 0.5, 0.3, 0.3, 0), new RoiMeta(Threshold: DefaultThresholdFor(rn))));
@@ -1616,6 +1482,7 @@ public partial class MainWindow : WpfWindow
 	/// <summary>节点检测项重命名（按索引定位，允许与其他检测项重名）。</summary>
 	internal void RenameOwnRoi(RecipeNode rn, int index, string newName)
 	{
+		if (!EnsureUnlocked("重命名检测项")) return;
 		newName = newName.Trim();
 		var items = NodeRois.ParseOwnFull(rn.Params.GetValueOrDefault("own_rois"));
 		if (index < 0 || index >= items.Count) return;
@@ -1630,6 +1497,7 @@ public partial class MainWindow : WpfWindow
 	/// <summary>节点检测项删除（按索引定位 own_rois 条目，热生效）；总范围索引随删除平移。</summary>
 	internal void DeleteOwnRoi(RecipeNode rn, int index)
 	{
+		if (!EnsureUnlocked("删除检测项")) return;
 		var items = NodeRois.ParseOwnFull(rn.Params.GetValueOrDefault("own_rois"));
 		if (index < 0 || index >= items.Count) return;
 		var name = items[index].Name;
@@ -1660,6 +1528,7 @@ public partial class MainWindow : WpfWindow
 	/// </summary>
 	internal void SetScopeIndex(RecipeNode rn, int index)
 	{
+		if (!EnsureUnlocked("设置总范围")) return;
 		rn.Params["scope_index"] = index.ToString();
 		HotApplyParam(rn, "scope_index", rn.Params["scope_index"]);
 		var own = NodeRois.ParseOwn(rn.Params.GetValueOrDefault("own_rois"));
@@ -1701,6 +1570,7 @@ public partial class MainWindow : WpfWindow
 	/// <summary>重绘选中检测项：进入绘制模式，下一次画的框替换该检测项的几何（名字保留），画完自动退出。</summary>
 	internal void StartRoiRedraw(RecipeNode rn, int index, NodeParamDialog? dialog)
 	{
+		if (!EnsureUnlocked("重绘检测项")) return;
 		if (_thumbImages.ContainsKey(rn.Name))
 		{
 			ShowNodeImage(rn.Name);
@@ -1855,252 +1725,27 @@ public partial class MainWindow : WpfWindow
 		StatusTrigger.Text = "触发: -";
 	}
 
-	private CameraParameters ReadParametersFromUi()
-	{
-		return new CameraParameters
-		{
-			ExposureTimeUs = (ParseDouble(ExposureBox.Text) ?? 5000.0),
-			Gain = ParseDouble(GainBox.Text).GetValueOrDefault(),
-			Gamma = (ParseDouble(GammaBox.Text) ?? 1.0),
-			PixelFormat = ((PixelFormatBox.SelectedIndex == 1) ? "RGB8" : "Mono8")
-		};
-	}
-
-	private TriggerSettings ReadTriggerSettingsFromUi()
-	{
-		TriggerSettings triggerSettings = new TriggerSettings();
-		TriggerSettings triggerSettings2 = triggerSettings;
-		int selectedIndex = TriggerModeBox.SelectedIndex;
-		if (1 == 0)
-		{
-		}
-		string triggerMode = selectedIndex switch
-		{
-			1 => "软触发", 
-			2 => "硬触发", 
-			_ => "连续", 
-		};
-		if (1 == 0)
-		{
-		}
-		triggerSettings2.TriggerMode = triggerMode;
-		triggerSettings.TriggerSource = "Line0";
-		triggerSettings.TriggerActivation = ((TriggerEdgeBox.SelectedIndex == 1) ? "Falling" : "Rising");
-		triggerSettings.GrabTimeoutMs = ParseDouble(GrabTimeoutBox.Text) ?? 500.0;
-		triggerSettings.MinTriggerIntervalMs = ParseDouble(TriggerIntervalBox.Text) ?? 100.0;
-		return triggerSettings;
-	}
-
-	private IoCommunicationSettings ReadIoCommunicationSettingsFromUi()
-	{
-		IoCommunicationSettings ioCommunicationSettings = new IoCommunicationSettings();
-		ioCommunicationSettings.Enabled = IoEnabledBox.IsChecked == true;
-		ioCommunicationSettings.TriggerInputLine = "Line0";
-		ioCommunicationSettings.TriggerEdge = "Rising";
-		ioCommunicationSettings.OutputMode = "NgOnly";
-		ioCommunicationSettings.NgOutputLine = (string.IsNullOrWhiteSpace(IoNgOutputLineBox.Text) ? "Line1" : IoNgOutputLineBox.Text.Trim());
-		ioCommunicationSettings.StrobeSource = (IoStrobeSourceBox.SelectedItem as ComboBoxItem)?.Content?.ToString() ?? "FrameTriggerWait";
-		ioCommunicationSettings.ActiveLevel = ((IoActiveLevelBox.SelectedIndex == 1) ? "Low" : "High");
-		ioCommunicationSettings.PulseMs = ParseDouble(IoPulseMsBox.Text) ?? 500.0;
-		return ioCommunicationSettings;
-	}
-
-	private void LoadParameterValuesFromStore()
-	{
-		if (_store == null)
-		{
-			return;
-		}
-		_isParameterEditInProgress = true;
-		try
-		{
-			CameraParameters cameraParameters = _store.Load();
-			ExposureBox.Text = cameraParameters.ExposureTimeUs.ToString("F0");
-			GainBox.Text = cameraParameters.Gain.ToString("F1");
-			GammaBox.Text = cameraParameters.Gamma.ToString("F2");
-			PixelFormatBox.SelectedIndex = ((cameraParameters.PixelFormat == "RGB8") ? 1 : 0);
-			TriggerSettings triggerSettings = _store.LoadTriggerSettings();
-			ComboBox triggerModeBox = TriggerModeBox;
-			string triggerMode = triggerSettings.TriggerMode;
-			if (1 == 0)
-			{
-			}
-			int selectedIndex = ((triggerMode == "软触发") ? 1 : ((triggerMode == "硬触发") ? 2 : 0));
-			if (1 == 0)
-			{
-			}
-			triggerModeBox.SelectedIndex = selectedIndex;
-			TriggerSourceBox.SelectedIndex = 0;
-			TriggerEdgeBox.SelectedIndex = ((triggerSettings.TriggerActivation == "Falling") ? 1 : 0);
-			GrabTimeoutBox.Text = triggerSettings.GrabTimeoutMs.ToString("F0");
-			TriggerIntervalBox.Text = triggerSettings.MinTriggerIntervalMs.ToString("F0");
-			IoCommunicationSettings io = _store.LoadIoCommunicationSettings();
-			IoEnabledBox.IsChecked = io.Enabled;
-			IoPulseMsBox.Text = io.PulseMs.ToString("F0");
-			IoNgOutputLineBox.Text = (string.IsNullOrWhiteSpace(io.NgOutputLine) ? "Line1" : io.NgOutputLine);
-			IoStrobeSourceBox.SelectedItem = IoStrobeSourceBox.Items.Cast<ComboBoxItem>().FirstOrDefault((ComboBoxItem x) => string.Equals(x.Content?.ToString(), io.StrobeSource, StringComparison.OrdinalIgnoreCase)) ?? IoStrobeSourceBox.Items.Cast<ComboBoxItem>().FirstOrDefault();
-			IoActiveLevelBox.SelectedIndex = (string.Equals(io.ActiveLevel, "Low", StringComparison.OrdinalIgnoreCase) ? 1 : 0);
-			UpdateIoButtonState();
-		}
-		finally
-		{
-			_isParameterEditInProgress = false;
-		}
-	}
-
-	private async void ParameterBox_LostFocus(object sender, RoutedEventArgs e)
-	{
-		if (!_isParameterEditInProgress)
-		{
-			_store?.Save(ReadParametersFromUi());
-			await ApplyParametersAsync();
-		}
-	}
-
-	private async void TriggerSettingBox_LostFocus(object sender, RoutedEventArgs e)
-	{
-		if (!_isParameterEditInProgress)
-		{
-			_store?.SaveTriggerSettings(ReadTriggerSettingsFromUi());
-			ICameraController? camera = _camera;
-			if (camera != null && camera.State == CameraConnectionState.Connected && _camera.TriggerMode == CameraTriggerMode.Hardware)
-			{
-				await _camera.ApplyTriggerSettingsAsync(ReadTriggerSettingsFromUi());
-			}
-		}
-	}
-
-	private async void IoCommunicationBox_Changed(object sender, RoutedEventArgs e)
-	{
-		if (_store == null || _isParameterEditInProgress)
-		{
-			return;
-		}
-		try
-		{
-			_store.SaveIoCommunicationSettings(ReadIoCommunicationSettingsFromUi());
-			ICameraController? camera = _camera;
-			if (camera != null && camera.State == CameraConnectionState.Connected)
-			{
-				await _camera.ConfigureIoCommunicationAsync(ReadIoCommunicationSettingsFromUi());
-			}
-		}
-		catch (Exception ex)
-		{
-			AppendLog("配置 IO 通信失败: " + ex.Message);
-		}
-	}
-
-	private async void IoCommunicationBox_LostFocus(object sender, RoutedEventArgs e)
-	{
-		if (_store == null || _isParameterEditInProgress)
-		{
-			return;
-		}
-		try
-		{
-			_store.SaveIoCommunicationSettings(ReadIoCommunicationSettingsFromUi());
-			ICameraController? camera = _camera;
-			if (camera != null && camera.State == CameraConnectionState.Connected)
-			{
-				await _camera.ConfigureIoCommunicationAsync(ReadIoCommunicationSettingsFromUi());
-			}
-		}
-		catch (Exception ex)
-		{
-			AppendLog("配置 IO 通信失败: " + ex.Message);
-		}
-	}
-
-	private async void BtnTestNgOutput_Click(object sender, RoutedEventArgs e)
-	{
-		if (_camera == null)
-		{
-			IoOutputStatusText.Text = "状态: 未连接相机";
-			return;
-		}
-		try
-		{
-			BtnTestNgOutput.IsEnabled = false;
-			IoCommunicationSettings settings = ReadIoCommunicationSettingsFromUi();
-			if (!settings.Enabled)
-			{
-				IoOutputStatusText.Text = "状态: 未启用 IO 通信";
-				return;
-			}
-			await _camera.PulseNgOutputAsync(settings);
-			IoOutputStatusText.Text = $"状态: 已输出 {settings.NgOutputLine} 脉冲 {settings.PulseMs:F0}ms";
-			AppendLog($"测试 NG 输出: {settings.NgOutputLine} {settings.PulseMs:F0}ms");
-		}
-		catch (Exception ex)
-		{
-			Exception ex2 = ex;
-			IoOutputStatusText.Text = "状态: 失败 " + ex2.Message;
-			AppendLog("测试 NG 输出失败: " + ex2.Message);
-		}
-		finally
-		{
-			UpdateIoButtonState();
-		}
-	}
-
-	private void UpdateIoButtonState()
-	{
-		Button btnTestNgOutput = BtnTestNgOutput;
-		ICameraController? camera = _camera;
-		btnTestNgOutput.IsEnabled = camera != null && camera.State == CameraConnectionState.Connected;
-	}
-
-	private async Task ApplyParametersAsync()
-	{
-		ICameraController? camera = _camera;
-		if (camera == null || camera.State != CameraConnectionState.Connected)
-		{
-			return;
-		}
-		try
-		{
-			await _camera.ApplyParametersAsync(ReadParametersFromUi());
-		}
-		catch (Exception ex)
-		{
-			AppendLog("应用参数失败: " + ex.Message);
-		}
-	}
-
 	private void UpdateButtonState()
 	{
-		ICameraController? camera = _camera;
-		bool flag = camera != null && camera.State == CameraConnectionState.Connected;
-		ICameraController? camera2 = _camera;
-		bool flag2 = camera2 != null && camera2.TriggerMode == CameraTriggerMode.Software;
-		ICameraController? camera3 = _camera;
-		bool flag3 = camera3 != null && camera3.TriggerMode == CameraTriggerMode.Hardware;
-		bool flag4 = _camera?.IsPreviewing ?? false;
-		bool flag5 = _camera?.IsHardTriggering ?? false;
-		BtnConnect.IsEnabled = (object)_selectedCamera != null && !flag;
-		BtnDisconnect.IsEnabled = flag;
-		BtnStartPreview.IsEnabled = flag && !flag4 && !flag2 && !flag3;
-		BtnStopPreview.IsEnabled = flag & flag4;
-		BtnSoftTrigger.IsEnabled = (flag & flag2) && !flag4 && !flag5;
-		UpdateIoButtonState();
 		bool flag6 = _runner?.IsRunning ?? false;
 		bool flag7 = flag6 && _runner.IsContinuous;
 		bool isEnabled = _recipe != null && HasEnabledImageSource() && !flag6;
 		BtnRunOnce.IsEnabled = isEnabled;
 		if (flag7)
 		{
-			BtnRunContinuous.Content = "停止执行";
+			RunContinuousIcon.Data = Geometry.Parse(IconStopData);
 			BtnRunContinuous.Background = new SolidColorBrush(Color.FromRgb(107, 48, 48));
 			BtnRunContinuous.BorderBrush = new SolidColorBrush(Color.FromRgb(138, 64, 64));
 			BtnRunContinuous.IsEnabled = true;
+			BtnRunContinuous.ToolTip = "停止执行";
 		}
 		else
 		{
-			BtnRunContinuous.Content = "连续执行";
+			RunContinuousIcon.Data = Geometry.Parse(IconContinuousData);
 			BtnRunContinuous.Background = new SolidColorBrush(Color.FromRgb(31, 74, 110));
 			BtnRunContinuous.BorderBrush = new SolidColorBrush(Color.FromRgb(47, 106, 158));
 			BtnRunContinuous.IsEnabled = isEnabled;
+			BtnRunContinuous.ToolTip = "连续执行：循环执行检测流程（再次点击停止）";
 		}
 	}
 
@@ -2128,6 +1773,7 @@ public partial class MainWindow : WpfWindow
 			_recipe.BaseDir = ConfigDir;
 			RecipeCombo.Text = _recipe.Name;
 			RefreshNodeTree();
+			ResetEditHistory();
 			AppendLog("已新建默认方案");
 		}
 	}
@@ -2154,6 +1800,7 @@ public partial class MainWindow : WpfWindow
 			_recipe.BaseDir = System.IO.Path.GetDirectoryName(openFileDialog.FileName) ?? ConfigDir;
 			RecipeCombo.Text = _recipe.Name;
 			RefreshNodeTree();
+			ResetEditHistory();
 			AppendLog("已打开方案: " + openFileDialog.FileName);
 			if (!HasEnabledImageSource())
 			{
@@ -2211,6 +1858,223 @@ public partial class MainWindow : WpfWindow
 		{
 			MessageBox.Show("保存失败: " + ex.Message, "错误", MessageBoxButton.OK, MessageBoxImage.Hand);
 		}
+	}
+
+	// ===== 方案锁定 =====
+
+	/// <summary>锁定守卫：锁定中返回 false 并记日志（在变更写入前调用）。</summary>
+	private bool EnsureUnlocked(string what)
+	{
+		if (!_uiLocked) return true;
+		AppendLog($"[锁定] 方案已锁定，无法{what}（点击工具栏「锁定」按钮解锁）");
+		return false;
+	}
+
+	private void BtnLock_Click(object sender, RoutedEventArgs e)
+	{
+		_uiLocked = BtnLock.IsChecked == true;
+		if (_uiLocked)
+		{
+			if (_roiDrawMode) ExitRoiDrawMode();
+			_roiSelIndex = -1;
+			_managerHighlightIndex = -1;
+			AppendLog("[锁定] 方案已锁定：ROI 与节点结构不可修改（防误触；参数数值仍可调整）");
+		}
+		else
+		{
+			AppendLog("[锁定] 已解锁方案编辑");
+		}
+		RenderRoiOverlay();
+	}
+
+	// ===== 方案编辑历史（撤销/重做）=====
+
+	/// <summary>当前方案 JSON 快照。</summary>
+	private string SnapshotRecipe() =>
+		_recipe is null ? "" : System.Text.Json.JsonSerializer.Serialize(_recipe, Recipe.JsonOptions);
+
+	/// <summary>重置历史（新建/打开方案后调用：基线快照，清空撤销/重做栈与模块结果历史）。</summary>
+	private void ResetEditHistory()
+	{
+		_undoStack.Clear();
+		_redoStack.Clear();
+		_moduleHistory.Clear();
+		_lastSnapshot = SnapshotRecipe();
+		UpdateUndoRedoState();
+		RefreshInspectorModuleResult();
+	}
+
+	/// <summary>
+	/// 变更入口调用：把「上一个快照点」压入撤销栈（惰性捕获——_lastSnapshot 是本次变更前的状态，
+	/// 即使 Params 已被写入也能取到变更前状态）；状态未变则跳过；任何新撤销点清空重做栈。
+	/// </summary>
+	private void PushUndoSnapshot()
+	{
+		if (_restoringSnapshot || _recipe is null) return;
+		var current = SnapshotRecipe();
+		if (current == _lastSnapshot) return;
+		_undoStack.Push(_lastSnapshot);
+		while (_undoStack.Count > MaxUndoSteps)
+		{
+			var keep = _undoStack.Take(MaxUndoSteps).ToArray(); // Stack 枚举顺序=栈顶→栈底
+			_undoStack.Clear();
+			for (var i = keep.Length - 1; i >= 0; i--) _undoStack.Push(keep[i]);
+		}
+		_redoStack.Clear();
+		_lastSnapshot = current;
+		UpdateUndoRedoState();
+	}
+
+	private void UndoRecipe()
+	{
+		if (_undoStack.Count == 0 || _recipe is null) return;
+		var current = SnapshotRecipe();
+		var snap = _undoStack.Pop();
+		_redoStack.Push(current);
+		RestoreRecipeSnapshot(snap, "撤销");
+	}
+
+	private void RedoRecipe()
+	{
+		if (_redoStack.Count == 0 || _recipe is null) return;
+		var current = SnapshotRecipe();
+		var snap = _redoStack.Pop();
+		_undoStack.Push(current);
+		RestoreRecipeSnapshot(snap, "恢复");
+	}
+
+	/// <summary>把快照灌回 UI：替换 _recipe、关掉绑定旧节点实例的弹窗、RefreshNodeTree 统一失效（标脏流水线/状态/叠加层）。</summary>
+	private void RestoreRecipeSnapshot(string json, string verb)
+	{
+		try
+		{
+			var r = System.Text.Json.JsonSerializer.Deserialize<Recipe>(json, Recipe.JsonOptions);
+			if (r is null) return;
+			_restoringSnapshot = true;
+			try
+			{
+				r.BaseDir = _recipe.BaseDir;
+				_recipe = r;
+				if (_roiDrawMode) ExitRoiDrawMode();
+				_roiSelIndex = -1;
+				_managerHighlightIndex = -1;
+				_redrawTargetIndex = -1;
+				_roiManager?.Close(); // 弹窗绑定的是旧 RecipeNode 实例
+				_roiDialog = null;
+				RecipeCombo.Text = r.Name;
+				RefreshNodeTree();
+				AppendLog($"[编辑] {verb}：方案已恢复到上一步（可撤销 {_undoStack.Count} 步 / 可恢复 {_redoStack.Count} 步）");
+			}
+			finally
+			{
+				_restoringSnapshot = false;
+			}
+		}
+		catch (Exception ex)
+		{
+			AppendLog($"[编辑] {verb}失败: {ex.Message}");
+		}
+		_lastSnapshot = SnapshotRecipe();
+		UpdateUndoRedoState();
+	}
+
+	private void UpdateUndoRedoState()
+	{
+		BtnUndo.IsEnabled = _undoStack.Count > 0;
+		BtnRedo.IsEnabled = _redoStack.Count > 0;
+	}
+
+	private void BtnUndo_Click(object sender, RoutedEventArgs e) => UndoRecipe();
+
+	private void BtnRedo_Click(object sender, RoutedEventArgs e) => RedoRecipe();
+
+	// ===== 工具栏入口：相机管理弹窗（设备级采集/触发）；IO 输出配置在「相机IO通信」节点弹窗 =====
+
+	private async void BtnCameraManager_Click(object sender, RoutedEventArgs e) => await OpenCameraManagerAsync();
+
+	/// <summary>工具栏入口：通信管理弹窗（设备级通信工具，TCP 客户端联机调试）。生产运行中拒绝操作。</summary>
+	private void BtnCommManager_Click(object sender, RoutedEventArgs e)
+	{
+		if (_runner.IsRunning)
+		{
+			MessageBox.Show("生产检测运行中，通信设备暂不可配置", "通信管理", MessageBoxButton.OK, MessageBoxImage.Asterisk);
+			return;
+		}
+
+		new CommManagementDialog(
+			this,
+			new CommDeviceStore(System.IO.Path.Combine(ConfigDir, "comm.json")),
+			AppendLog).ShowDialog();
+	}
+
+	private async Task OpenCameraManagerAsync()
+	{
+		// 确保控制器存在；首次枚举一次作为弹窗初始列表（弹窗内可随时重新刷新）
+		if (_camera == null)
+		{
+			_camera = CreateCamera();
+			_camera.FrameReceived += Camera_FrameReceived;
+		}
+
+		// 先确保配置存储存在：弹窗内连接后要按已保存参数应用，应用参数后要落盘
+		_store ??= new CameraParameterStore(System.IO.Path.Combine(ConfigDir, "camera.json"));
+		IReadOnlyList<CameraInfo> cameras = [];
+		try
+		{
+			AppendLog("正在枚举相机...");
+			cameras = await _camera.EnumerateAsync();
+			AppendLog($"枚举完成，发现 {cameras.Count} 台相机");
+			StatusCamera.Text = ((cameras.Count == 0) ? "相机: 未发现相机" : $"相机: {cameras.Count} 台");
+		}
+		catch (Exception ex)
+		{
+			AppendLog("枚举相机失败: " + ex.Message + "（可在弹窗内点「刷新相机」重试）");
+		}
+
+		new CameraManagementDialog(
+			this,
+			_camera,
+			cameras,
+			_selectedCamera,
+			_store,
+			camera =>
+			{
+				_selectedCamera = camera;
+				UpdateButtonState();
+			},
+			AppendLog,
+			(parameters, trigger) =>
+			{
+				_store.Save(parameters);
+				_store.SaveTriggerSettings(trigger);
+			},
+			() => !(_runner?.IsRunning ?? false)).Show();
+	}
+
+	// ===== 菜单/快捷键命令（复用工具栏同名处理）=====
+
+	private void MenuExit_Click(object sender, RoutedEventArgs e) => Close();
+
+	private void CmdRecipeNew_Executed(object sender, ExecutedRoutedEventArgs e) => RecipeNew_Click(sender, e);
+
+	private void CmdRecipeOpen_Executed(object sender, ExecutedRoutedEventArgs e) => RecipeOpen_Click(sender, e);
+
+	private void CmdRecipeSave_Executed(object sender, ExecutedRoutedEventArgs e) => RecipeSave_Click(sender, e);
+
+	private void CmdUndo_Executed(object sender, ExecutedRoutedEventArgs e) => UndoRecipe();
+
+	private void CmdRedo_Executed(object sender, ExecutedRoutedEventArgs e) => RedoRecipe();
+
+	private void CmdUndo_CanExecute(object sender, CanExecuteRoutedEventArgs e)
+	{
+		e.CanExecute = _undoStack.Count > 0;
+		e.Handled = true;
+	}
+
+	private void CmdRedo_CanExecute(object sender, CanExecuteRoutedEventArgs e)
+	{
+		e.CanExecute = _redoStack.Count > 0;
+		e.Handled = true;
 	}
 
 	private bool ConfirmStop(string msg)
@@ -2290,6 +2154,71 @@ public partial class MainWindow : WpfWindow
 		}
 		RefreshStatusPanel();
 		RenderRoiOverlay();
+		RefreshKeyBindings();
+	}
+
+	/// <summary>
+	/// 扫描方案里启用的「按键控制」节点，重绑触发键位（集合不变则跳过）。
+	/// 在节点树刷新/键位参数变更后调用。
+	/// </summary>
+	private void RefreshKeyBindings()
+	{
+		var keys = new HashSet<Key>();
+		if (_recipe != null)
+		{
+			foreach (RecipeNode node in _recipe.Nodes)
+			{
+				if (!node.Enabled || node.Type != "KeyControl")
+				{
+					continue;
+				}
+
+				Key? parsed = KeyControlNode.ParseKey(node.Params.GetValueOrDefault("trigger_key"));
+				if (parsed.HasValue)
+				{
+					keys.Add(parsed.Value);
+				}
+			}
+		}
+
+		if (keys.Count == _keyTriggerKeys.Count && keys.SetEquals(_keyTriggerKeys))
+		{
+			return;
+		}
+
+		_keyTriggerKeys.Clear();
+		foreach (Key k in keys)
+		{
+			_keyTriggerKeys.Add(k);
+		}
+		AppendLog(keys.Count > 0
+			? "[按键触发] 已绑定键位: " + string.Join("、", keys.Select(KeyControlNode.KeyName)) + "（空闲时按下 = 执行一次检测流程）"
+			: "[按键触发] 当前无绑定键位");
+	}
+
+	private void Window_PreviewKeyDown(object? sender, KeyEventArgs e)
+	{
+		Key key = (e.Key == Key.System) ? e.SystemKey : e.Key;
+		if (_keyTriggerKeys.Count == 0 || !_keyTriggerKeys.Contains(key))
+		{
+			return;
+		}
+
+		// 输入控件聚焦时不触发（参数输入框/下拉框里打字或按空格不能误跑流程）
+		if (Keyboard.FocusedElement is TextBoxBase or ComboBox)
+		{
+			return;
+		}
+
+		e.Handled = true;
+		if (_runner?.IsRunning ?? false)
+		{
+			AppendLog("[按键触发] 已有执行在进行中，忽略本次按键");
+			return;
+		}
+
+		AppendLog("[按键触发] 按下「" + KeyControlNode.KeyName(key) + "」→ 执行一次检测流程");
+		_ = RunOnceAsync();
 	}
 
 	private void RefreshStatusPanel()
@@ -2419,7 +2348,7 @@ public partial class MainWindow : WpfWindow
 
 	private bool? ComputeCropRoiMismatch()
 	{
-		RecipeNode recipeNode = _recipe?.Nodes.FirstOrDefault((RecipeNode n) => n.Enabled && (n.Type == "PatchCore" || n.Type == "YOLO" || n.Type == "Seg"));
+		RecipeNode recipeNode = _recipe?.Nodes.FirstOrDefault((RecipeNode n) => n.Enabled && (n.Type == "PatchCore" || n.Type == "YOLO" || n.Type == "Seg" || n.Type == "SemanticSeg"));
 		if (recipeNode == null)
 		{
 			return false;
@@ -2484,6 +2413,12 @@ public partial class MainWindow : WpfWindow
 		}
 	}
 
+	/// <summary>模块弹窗取本节点最近一次执行结果（无则 null）。</summary>
+	internal ModuleRunRecord? GetModuleLatestResult(string nodeName) => _moduleHistory.GetLatest(nodeName);
+
+	/// <summary>模块弹窗取本节点执行历史（旧→新）。</summary>
+	internal IReadOnlyList<ModuleRunRecord> GetModuleHistory(string nodeName) => _moduleHistory.GetHistory(nodeName);
+
 	private void NodeTree_MouseDoubleClick(object sender, MouseButtonEventArgs e)
 	{
 		if (NodeTree.SelectedItem is TreeViewItem { Tag: RecipeNode tag })
@@ -2500,7 +2435,11 @@ public partial class MainWindow : WpfWindow
 
 	private void AddNode_Click(object sender, RoutedEventArgs e)
 	{
-		if (_recipe == null || !ConfirmStop("添加模块将停止当前服务。继续？"))
+		if (_recipe == null || !EnsureUnlocked("添加模块"))
+		{
+			return;
+		}
+		if (!ConfirmStop("添加模块将停止当前服务。继续？"))
 		{
 			return;
 		}
@@ -2570,6 +2509,7 @@ public partial class MainWindow : WpfWindow
 					reference = obj;
 					recipeNode.Rules = list;
 				}
+				PushUndoSnapshot();
 				_recipe.Nodes.Add(recipeNode);
 				RefreshNodeTree();
 				AppendLog("已添加节点: " + recipeNode.Name);
@@ -2585,6 +2525,26 @@ public partial class MainWindow : WpfWindow
 		{
 			ExitRoiDrawMode();
 		}
+		RefreshInspectorModuleResult();
+	}
+
+	/// <summary>左侧流程树当前选中的节点（未选中为 null）。</summary>
+	private RecipeNode? SelectedRecipeNode =>
+		NodeTree.SelectedItem is TreeViewItem { Tag: RecipeNode rn } ? rn : null;
+
+	/// <summary>刷新右侧「模块结果」页签（跟随流程树选中节点；每轮执行结果落地后也会调用）。</summary>
+	private void RefreshInspectorModuleResult()
+	{
+		var rn = SelectedRecipeNode;
+		ModuleResultTitle.Text = rn is null
+			? "模块结果（在左侧流程选择节点）"
+			: $"模块结果 - {rn.Name}";
+		if (rn is null)
+		{
+			InspectorResultView.Update(null, Array.Empty<ModuleRunRecord>());
+			return;
+		}
+		InspectorResultView.Update(_moduleHistory.GetLatest(rn.Name), _moduleHistory.GetHistory(rn.Name));
 	}
 
 	internal void BuildNodeEditor(RecipeNode rn, StackPanel panel, NodeParamDialog dialog)
@@ -2692,7 +2652,57 @@ public partial class MainWindow : WpfWindow
 		{
 			ShowParamDefsInspector(rn, dialog);
 		}
-		if (rn.Type is "PatchCore" or "YOLO" or "Seg" or "ContourMatch")
+		if (rn.Type == "CameraIo")
+		{
+			// 相机IO通信节点：IO 输出配置即本节点参数；提供按当前参数的测试输出（与执行共用 CameraIoNode.BuildOutputSettings）
+			EditorPanel.Children.Add(new TextBlock
+			{
+				Text = "IO 输出测试",
+				FontWeight = FontWeights.Bold,
+				Margin = new Thickness(0.0, 14.0, 0.0, 6.0)
+			});
+			Button ioTestButton = new Button
+			{
+				Content = "测试输出脉冲（按当前参数）",
+				Height = 28.0,
+				HorizontalAlignment = HorizontalAlignment.Left,
+				ToolTip = "按本节点当前输出配置（输出线/Strobe源/有效电平/持续时间）输出一次脉冲；相机须已连接"
+			};
+			ioTestButton.Click += async delegate
+			{
+				if (_runner?.IsRunning ?? false)
+				{
+					AppendLog("[IO测试] 生产检测运行中，暂不可测试");
+					return;
+				}
+				ICameraController? camera = _camera;
+				if (camera == null || camera.State != CameraConnectionState.Connected)
+				{
+					AppendLog("[IO测试] 相机未连接，无法输出（相机请在「相机管理」里连接）");
+					return;
+				}
+				try
+				{
+					var settings = CameraIoNode.BuildOutputSettings(rn.Params);
+					await camera.PulseNgOutputAsync(settings);
+					AppendLog($"[IO测试] 已输出 {settings.NgOutputLine} 脉冲 {settings.PulseMs:F0}ms（Strobe={settings.StrobeSource}，有效电平={(settings.ActiveLevel == "Low" ? "低" : "高")}）");
+				}
+				catch (Exception ex)
+				{
+					AppendLog("[IO测试] 输出失败: " + ex.Message);
+				}
+			};
+			EditorPanel.Children.Add(ioTestButton);
+			EditorPanel.Children.Add(new TextBlock
+			{
+				Text = "说明: 触发输入（Line0/触发沿）在「相机管理」的触发参数里配置；本节点只负责按判定结果输出脉冲。",
+				TextWrapping = TextWrapping.Wrap,
+				Foreground = (Brush)FindResource("MutedTextBrush"),
+				FontSize = 11.0,
+				Margin = new Thickness(0.0, 6.0, 0.0, 0.0)
+			});
+		}
+		if (rn.Type is "PatchCore" or "YOLO" or "Seg" or "SemanticSeg" or "ContourMatch")
 		{
 			// 轮廓匹配：只有「绘制搜索区域」一种 ROI 功能（无检测项管理）；ROI 库已移除，所有 ROI 均为本节点私有
 			bool isContour = rn.Type == "ContourMatch";
@@ -2826,8 +2836,10 @@ public partial class MainWindow : WpfWindow
 		{
 			c.Click += delegate
 			{
+				if (!EnsureUnlocked("删除节点")) return;
 				if (ConfirmStop("删除节点将停止当前服务。继续？"))
 				{
+					PushUndoSnapshot();
 					_recipe?.Nodes.RemoveAll((RecipeNode n) => n.Name == rn.Name);
 					RefreshNodeTree();
 				}
@@ -2837,6 +2849,7 @@ public partial class MainWindow : WpfWindow
 
 	private void RenameNode(RecipeNode rn, string newName)
 	{
+		if (!EnsureUnlocked("重命名节点")) return;
 		newName = newName.Trim();
 		if (_recipe == null || string.IsNullOrWhiteSpace(newName) || newName == rn.Name)
 		{
@@ -2848,7 +2861,10 @@ public partial class MainWindow : WpfWindow
 			return;
 		}
 		string name = rn.Name;
+		PushUndoSnapshot();
 		rn.Name = newName;
+		_moduleHistory.RenameNode(name, newName); // 模块结果历史跟随改名
+		RefreshInspectorModuleResult();
 		int num = 0;
 		foreach (RecipeNode node in _recipe.Nodes)
 		{
@@ -2879,7 +2895,7 @@ public partial class MainWindow : WpfWindow
 
 	private void MoveNode(RecipeNode rn, int delta)
 	{
-		if (_recipe == null)
+		if (_recipe == null || !EnsureUnlocked("调整节点顺序"))
 		{
 			return;
 		}
@@ -2889,6 +2905,7 @@ public partial class MainWindow : WpfWindow
 		{
 			return;
 		}
+		PushUndoSnapshot();
 		_recipe.Nodes.RemoveAt(num);
 		_recipe.Nodes.Insert(num2, rn);
 		RefreshNodeTree();
@@ -3017,6 +3034,9 @@ public partial class MainWindow : WpfWindow
 		case "CameraIo":
 			readOnlyList = CameraIoNode.StaticParamDefs;
 			break;
+		case "KeyControl":
+			readOnlyList = KeyControlNode.StaticParamDefs;
+			break;
 		case "ImageSource":
 		case "ImageLoad":
 			readOnlyList = ImageSourceNode.StaticParamDefs;
@@ -3035,6 +3055,9 @@ public partial class MainWindow : WpfWindow
 			break;
 		case "Seg":
 			readOnlyList = SegNode.StaticParamDefs;
+			break;
+		case "SemanticSeg":
+			readOnlyList = SemanticSegNode.StaticParamDefs;
 			break;
 		case "ContourMatch":
 			readOnlyList = ContourMatchNode.StaticParamDefs;
@@ -3343,9 +3366,17 @@ public partial class MainWindow : WpfWindow
 			Foreground = (Brush)FindResource("MutedTextBrush"),
 			Margin = new Thickness(0.0, 12.0, 0.0, 0.0)
 		});
+		EditorPanel.Children.Add(new TextBlock
+		{
+			Text = "仅勾选的节点 ROI 会跟随修正（海康 VM 同语义）；未勾选的节点不修正",
+			TextWrapping = TextWrapping.Wrap,
+			Foreground = (Brush)FindResource("MutedTextBrush"),
+			FontSize = 11.0,
+			Margin = new Thickness(0.0, 2.0, 0.0, 0.0)
+		});
 		var downstream = (_recipe?.Nodes ?? new List<RecipeNode>())
 			.Skip(selfIdx + 1)
-			.Where(n => n.Type is "PatchCore" or "YOLO" or "Seg" or "ContourMatch")
+			.Where(n => n.Type is "PatchCore" or "YOLO" or "Seg" or "SemanticSeg" or "ContourMatch")
 			.ToList();
 		if (downstream.Count == 0)
 		{
@@ -3512,7 +3543,7 @@ public partial class MainWindow : WpfWindow
 					using (Mat bgr = ImagePreprocessService.LoadBgr(file))
 					{
 						Dictionary<string, Mat> overrides = new Dictionary<string, Mat> { [sourceName] = bgr };
-						PipelineResult result = _pipeline.Run(bgr, System.IO.Path.GetFileName(file), null, null, null, overrides);
+						PipelineResult result = _pipeline.Run(bgr, System.IO.Path.GetFileName(file), null, null, overrides);
 						string raw = ((result.NodeValues.TryGetValue(rn.Name, out vals) && vals.TryGetValue("score", out s)) ? s : null);
 						if (raw == null || !double.TryParse(raw, out var score))
 						{
@@ -3579,6 +3610,11 @@ public partial class MainWindow : WpfWindow
 
 	internal void HotApplyParam(RecipeNode rn, string key, string value)
 	{
+		PushUndoSnapshot(); // 惰性捕获：_lastSnapshot 保存的是本参数写入前的状态
+		if (key == "trigger_key")
+		{
+			RefreshKeyBindings(); // 按键控制节点键位变更 → 立即重绑
+		}
 		if (_pipeline == null)
 		{
 			return;
@@ -3586,7 +3622,7 @@ public partial class MainWindow : WpfWindow
 		IModelNode modelNode = _pipeline.Nodes.FirstOrDefault((IModelNode n) => string.Equals(n.Name, rn.Name, StringComparison.OrdinalIgnoreCase));
 		if (modelNode != null)
 		{
-			if ((modelNode is PatchCoreNode || modelNode is YoloNode || modelNode is SegNode || modelNode is ContourMatchNode) && key == "model_dir")
+			if ((modelNode is PatchCoreNode || modelNode is YoloNode || modelNode is SegNode || modelNode is SemanticSegNode || modelNode is ContourMatchNode) && key == "model_dir")
 			{
 				_pipelineDirty = true;
 			}
@@ -3635,18 +3671,24 @@ public partial class MainWindow : WpfWindow
 		}
 		ComboBox comboBox = combo;
 		string? selectedItem;
-		if (rn.Params.TryGetValue(def.Key, out string value))
+		if (rn.Params.TryGetValue(def.Key, out string value) && !string.IsNullOrEmpty(value))
 		{
 			string[]? choices = def.Choices;
 			if (choices != null && Enumerable.Contains(choices, value))
 			{
 				selectedItem = value;
-				goto IL_00f0;
+			}
+			else
+			{
+				// 旧配方的存量值（如已中文化的英文名）不在新选项里：原样追加显示，改选后自然迁移
+				combo.Items.Add(value);
+				selectedItem = value;
 			}
 		}
-		selectedItem = def.Default;
-		goto IL_00f0;
-		IL_00f0:
+		else
+		{
+			selectedItem = def.Default;
+		}
 		comboBox.SelectedItem = selectedItem;
 		combo.SelectionChanged += delegate
 		{
@@ -4025,7 +4067,7 @@ public partial class MainWindow : WpfWindow
 
 	private static BitmapSource? MatToBitmap(Mat mat)
 	{
-		if (mat.Empty())
+		if (mat.IsDisposed || mat.Empty())
 		{
 			return null;
 		}
@@ -4079,6 +4121,21 @@ public partial class MainWindow : WpfWindow
 
 	private void Window_Closed(object? sender, EventArgs e)
 	{
+		// 相机最先释放（预览/硬触发激活时也必须关闭设备）：后台线程 + 超时上限，
+		// 防「UI 线程同步等待 + 内部 await 回投」死锁把进程挂死（症状：弹窗残留桌面、相机被占用）。
+		ICameraController? camera = _camera;
+		if (camera != null)
+		{
+			try
+			{
+				Task.Run(() => camera.Dispose()).Wait(TimeSpan.FromSeconds(5));
+			}
+			catch (Exception exception)
+			{
+				AppLog.Warn("退出时释放相机失败", exception);
+			}
+		}
+
 		try
 		{
 			_runner?.Dispose();
@@ -4088,7 +4145,6 @@ public partial class MainWindow : WpfWindow
 				_recipe.Name = RecipeCombo.Text.Trim();
 				RecipeStore.SaveAsDefault(_recipe, ConfigDir);
 			}
-			_camera?.Dispose();
 		}
 		catch (Exception exception)
 		{

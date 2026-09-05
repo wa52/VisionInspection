@@ -1,14 +1,9 @@
 namespace SpeakerVisionInspection.Services;
 
+/// <summary>相机运行时配置。名称保留以兼容现有调用，程序不依赖 VisionMaster 或其授权服务。</summary>
 public sealed record VisionMasterConfig
 {
-    public string? VisionMasterRoot { get; init; }
-    public string? MvdSdkRoot { get; init; }
     public string? MvsRuntimeDir { get; init; }
-
-    /// <summary>MVS SDK Development 根目录（含 Development\DotNet\win64\netstandard2.0\MvCameraControl.Net.dll）。</summary>
-    public string? MvsSdkDevRoot { get; init; }
-
     /// <summary>图像保存目录；未配置时回退到应用目录下 images。</summary>
     public string? SaveImageDir { get; init; }
 }

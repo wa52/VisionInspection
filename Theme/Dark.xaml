@@ -356,6 +356,26 @@
         <Setter Property="Foreground" Value="{StaticResource BorderBrush}" />
     </Style>
 
+    <!-- ToolTip：默认白底模板在深色主题下白底白字，必须重写模板 -->
+    <Style TargetType="ToolTip">
+        <Setter Property="Background" Value="{StaticResource PanelBrush}" />
+        <Setter Property="Foreground" Value="{StaticResource TextBrush}" />
+        <Setter Property="BorderBrush" Value="{StaticResource BorderBrush}" />
+        <Setter Property="Template">
+            <Setter.Value>
+                <ControlTemplate TargetType="ToolTip">
+                    <Border Background="{TemplateBinding Background}"
+                            BorderBrush="{TemplateBinding BorderBrush}"
+                            BorderThickness="1"
+                            CornerRadius="3"
+                            Padding="8,4">
+                        <ContentPresenter />
+                    </Border>
+                </ControlTemplate>
+            </Setter.Value>
+        </Setter>
+    </Style>
+
     <Style TargetType="DataGrid">
         <Setter Property="Background" Value="{StaticResource PanelBrush}" />
         <Setter Property="Foreground" Value="{StaticResource TextBrush}" />

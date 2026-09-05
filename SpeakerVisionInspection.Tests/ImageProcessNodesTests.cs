@@ -306,6 +306,9 @@ public class ImageProcessNodesTests : IDisposable
         var result = node.Run(input, ctx);
         Assert.Null(result.OutputImage);
         Assert.Contains(logs, l => l.Contains("[ImageSource]") && l.Contains("相机未连接"));
+        // 取不到帧 → ERROR 停线（不再静默 OK+空图）
+        Assert.Equal("ERROR", result.Decision);
+        Assert.Contains("相机未连接", result.Error);
     }
 
     [Fact]
@@ -322,6 +325,10 @@ public class ImageProcessNodesTests : IDisposable
         var result = node.Run(input, ctx);
         Assert.Null(result.OutputImage);
         Assert.Contains(logs, l => l.Contains("[ImageSource]") && l.Contains("取帧超时"));
+        // 取不到帧 → ERROR 停线，并提示硬触发模式这一最常见原因
+        Assert.Equal("ERROR", result.Decision);
+        Assert.Contains("硬触发", result.Error);
+        Assert.Contains("相机管理", result.Error);
     }
 
     [Fact]

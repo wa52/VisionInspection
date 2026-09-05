@@ -25,7 +25,6 @@ public sealed class CameraInspectionService : IDisposable
     private readonly IPlcClient _plc;
     private readonly Pipeline _pipeline;
     private readonly Func<TriggerSettings> _getTriggerSettings;
-    private readonly Func<IoCommunicationSettings> _getIoSettings;
     private readonly Action<string> _log;
     private readonly string _resultDir;
 
@@ -49,7 +48,6 @@ public sealed class CameraInspectionService : IDisposable
         IPlcClient plc,
         Pipeline pipeline,
         Func<TriggerSettings> getTriggerSettings,
-        Func<IoCommunicationSettings> getIoSettings,
         string resultDir,
         Action<string>? log = null)
     {
@@ -57,7 +55,6 @@ public sealed class CameraInspectionService : IDisposable
         _plc = plc;
         _pipeline = pipeline;
         _getTriggerSettings = getTriggerSettings;
-        _getIoSettings = getIoSettings;
         _resultDir = resultDir;
         _log = log ?? (_ => { });
 
@@ -182,7 +179,6 @@ public sealed class CameraInspectionService : IDisposable
             var pr = _pipeline.Run(
                 bgr,
                 imageName,
-                cameraIoSettings: _getIoSettings(),
                 cameraIoOutput: settings => _camera.PulseNgOutputAsync(settings).GetAwaiter().GetResult());
             var result = ToDetectionResult(pr);
 

@@ -68,9 +68,7 @@ public sealed class PipelineRunContext
     public Dictionary<string, Mat> Images { get; } = new();
     /// <summary>最近一个条件检测节点的结果（可为 null）。</summary>
     public NodeResult? DecisionResult { get; set; }
-    /// <summary>相机管理页配置的 Strobe/光耦输出参数。</summary>
-    public IoCommunicationSettings? CameraIoSettings { get; }
-    /// <summary>相机 IO 输出执行器。生产模式下由 CameraInspectionService 注入。</summary>
+    /// <summary>相机 IO 输出执行器（相机未连接时为 null → CameraIo 节点 ERROR 停线）。生产模式下由 CameraInspectionService 注入。</summary>
     public Action<IoCommunicationSettings>? CameraIoOutput { get; }
 
     /// <summary>
@@ -81,11 +79,9 @@ public sealed class PipelineRunContext
 
     public PipelineRunContext(
         Mat input,
-        IoCommunicationSettings? cameraIoSettings = null,
         Action<IoCommunicationSettings>? cameraIoOutput = null)
     {
         Input = input;
-        CameraIoSettings = cameraIoSettings;
         CameraIoOutput = cameraIoOutput;
     }
 

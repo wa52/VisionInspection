@@ -178,7 +178,12 @@ public sealed class PatchCoreNode : IModelNode
                 : BuildHeatImageMulti(detectSrc, roiList.Select(r => (r.Rect, r.Name, r.PatchMap)).ToList(), modelThreshold, annotations);
         }
 
-        // ROI 切图保存（按节点自身判定分 OK/NG 目录；文件名含 ROI 名；检测项级「是否存图」过滤）
+        // ROI 切图保存（按节点自身判定分 OK/NG 目录；文件名含 ROI 名；检测项级「是否存图」过滤）；目录未配置时记一次日志
+        var cropDir = _params.GetValueOrDefault("crop_dir");
+        if (string.IsNullOrWhiteSpace(cropDir) && results.Any(r => r.SaveImage))
+        {
+            Log?.Invoke($"[切图] {Name}: 未配置「ROI切图保存目录」(crop_dir)，本次 {results.Count(r => r.SaveImage)} 个检测项切图未保存");
+        }
         foreach (var r in results)
         {
             if (r.SaveImage)
@@ -433,11 +438,7 @@ public sealed class PatchCoreNode : IModelNode
     private void SaveCrop(Mat crop, string decision, double score, string roiName, RoiRect rect)
     {
         var dir = _params.GetValueOrDefault("crop_dir");
-        if (string.IsNullOrWhiteSpace(dir))
-        {
-            Log?.Invoke($"[切图] {Name}: 未配置切图保存目录，本次不保存");
-            return;
-        }
+        if (string.IsNullOrWhiteSpace(dir)) return; // 未配置目录的日志在 Run 里统一记，避免每个 ROI 重复刷屏
 
         try
         {

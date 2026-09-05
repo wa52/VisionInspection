@@ -1,0 +1,50 @@
+{
+  "schema_version": 1,
+  "diagram_type": "architecture",
+  "meta": {
+    "title": "SpeakerVisionInspection 运行时架构",
+    "locale": "zh-CN",
+    "output": "docs/architecture-runtime.html",
+    "quality_profile": "showcase",
+    "viewBox": [1380, 530]
+  },
+  "components": [
+    { "id": "recipe_store", "type": "database", "label": "RecipeStore 持久化", "sublabel": "recipe.json · 相机/触发 json", "pos": [50, 44], "size": [190, 62] },
+    { "id": "main_window", "type": "frontend", "label": "WPF 主窗口", "sublabel": "方案编辑 · 单次/连续执行 · 结果显示", "pos": [320, 40], "size": [280, 70] },
+    { "id": "comm_links", "type": "backend", "label": "Comm / ICommLink", "sublabel": "TCP 客户端/服务端 · UDP · 串口", "pos": [940, 44], "size": [210, 62] },
+    { "id": "image_source", "type": "backend", "label": "图像源节点", "sublabel": "相机帧 / 文件", "pos": [220, 180], "size": [210, 64] },
+    { "id": "contour_match", "type": "backend", "label": "轮廓匹配节点", "sublabel": "ShapeMatch 模板定位", "pos": [480, 180], "size": [160, 64] },
+    { "id": "tool_nodes", "type": "backend", "label": "工具节点", "sublabel": "位置修正 · 相机IO · 存图/显示", "pos": [740, 180], "size": [190, 64] },
+    { "id": "model_nodes", "type": "backend", "label": "检测模型节点", "sublabel": "PatchCore · YOLO · Seg · SemanticSeg", "pos": [1060, 180], "size": [250, 68] },
+    { "id": "model_files", "type": "database", "label": "模型 / 模板目录 (model_dir)", "sublabel": "ONNX 模型 · 记忆库 · classes.txt", "pos": [1060, 310], "size": [250, 68] },
+    { "id": "camera_ctrl", "type": "backend", "label": "ICameraController", "sublabel": "海康 MVS SDK 封装", "pos": [200, 340], "size": [190, 68] },
+    { "id": "inspection_service", "type": "backend", "label": "CameraInspectionService", "sublabel": "生产闭环 · 状态机 · IPlcClient", "pos": [520, 340], "size": [230, 68] },
+    { "id": "hik_camera", "type": "external", "label": "海康工业相机", "sublabel": "硬触发 Line0 · IO 输出", "pos": [205, 445], "size": [180, 64] },
+    { "id": "plc", "type": "external", "label": "产线 PLC", "sublabel": "Ready / Busy / OK / NG", "pos": [1090, 445], "size": [170, 64] }
+  ],
+  "boundaries": [
+    { "kind": "region", "label": "SpeakerVisionInspection 应用 (WPF · net8.0 · x64)", "wraps": ["recipe_store", "main_window", "comm_links", "image_source", "contour_match", "tool_nodes", "model_nodes", "model_files", "camera_ctrl", "inspection_service"], "pad": 24 },
+    { "kind": "region", "label": "Detection 节点流水线 (Pipeline)", "wraps": ["image_source", "contour_match", "tool_nodes", "model_nodes"], "pad": 16 }
+  ],
+  "connections": [
+    { "from": "hik_camera", "to": "camera_ctrl", "label": "硬触发取流 Line0", "variant": "emphasis" },
+    { "from": "camera_ctrl", "to": "inspection_service", "label": "帧回调·同步拷贝", "variant": "emphasis" },
+    { "from": "inspection_service", "to": "image_source", "label": "有界队列(容量1) 帧送检", "variant": "emphasis", "fromSide": "top", "toSide": "bottom", "via": [[635, 305], [325, 305]] },
+    { "from": "image_source", "to": "contour_match", "label": "取图" },
+    { "from": "contour_match", "to": "tool_nodes", "label": "位姿 loc_x/y/angle" },
+    { "from": "tool_nodes", "to": "model_nodes", "label": "位置修正 · ROI 跟随", "labelDy": -12 },
+    { "from": "model_nodes", "to": "inspection_service", "label": "OK/NG 判定回传", "variant": "emphasis", "fromSide": "left", "toSide": "right", "via": [[1000, 214], [1000, 374]] },
+    { "from": "model_nodes", "to": "main_window", "label": "NodeImages · 判定 · 矢量标注", "variant": "dashed", "fromSide": "top", "toSide": "top", "via": [[1185, 20], [460, 20]] },
+    { "from": "main_window", "to": "image_source", "label": "单次/连续执行", "variant": "emphasis", "fromSide": "bottom", "toSide": "top", "via": [[460, 145], [325, 145]] },
+    { "from": "main_window", "to": "recipe_store", "label": "方案读写" },
+    { "from": "main_window", "to": "comm_links", "label": "通信管理弹窗", "variant": "dashed" },
+    { "from": "inspection_service", "to": "plc", "label": "Ready→Busy→OK/NG", "variant": "emphasis", "fromSide": "bottom", "toSide": "top", "via": [[635, 426], [1175, 426]] },
+    { "from": "model_nodes", "to": "model_files", "label": "加载 ONNX/类别", "labelAt": [1185, 279] }
+  ],
+  "cards": [
+    { "dot": "cyan", "title": "启动与配置", "items": ["EnvironmentCheckService 启动自检 x64 进程与 MVS 托管/原生 DLL，缺失给中文可操作提示", "RecipeStore 启动加载 exe 同目录 recipe.json 并自动保存，旧 config.json 自动迁移", "主窗口与相机管理弹窗复用同一 ICameraController 句柄，生产运行中拒绝设备级操作"] },
+    { "dot": "emerald", "title": "生产闭环（硬触发）", "items": ["硬触发帧在相机事件线程内同步拷贝后立即释放，不异步持有 Mat", "有界队列容量 1，DropWrite 溢出计入 TriggerStateMachine.OverrunCount（Armed/Busy/Error）", "OK/NG → IPlcClient 状态语义 Ready→Busy→OK/NG（Error 可 Reset），NG 时由相机IO通信节点下发 Strobe 脉冲"] },
+    { "dot": "violet", "title": "Detection 节点流水线", "items": ["NodeFactory 注册节点，未注册类型运行时记 ERROR 不崩溃", "检测项 (ROI) 级阈值/启停/判断/存图，总范围 scope_index 过滤结果", "位置修正读取 loc_x/loc_y/loc_angle 标准契约，目标节点 ROI 跟随工件平移+旋转"] },
+    { "dot": "amber", "title": "外部依赖", "items": ["海康 MVS SDK：MvCameraControl.Net.dll（x64）+ 相机原生运行时，appsettings.json 可覆盖路径", "推理栈：ONNX Runtime + OpenCvSharp（本仓库自带，不依赖 VisionMaster 服务）", "模型目录契约：PatchCore = model.onnx + memory_bank.bin；YOLO/Seg/SemanticSeg = best.onnx + classes.txt；轮廓匹配 = shape_template.json"] }
+  ]
+}

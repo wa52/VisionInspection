@@ -18,6 +18,9 @@ public sealed record TriggerSettings
     /// <summary>输入滤波/去抖（us）。</summary>
     public double TriggerFilterUs { get; set; }
 
+    /// <summary>条件触发数（AcquisitionBurstFrameCount）：单次触发连续出帧数。</summary>
+    public int BurstFrameCount { get; set; } = 1;
+
     /// <summary>最小触发间隔（ms）。</summary>
     public double MinTriggerIntervalMs { get; set; } = 100;
 

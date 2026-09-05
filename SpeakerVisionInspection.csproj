@@ -16,6 +16,7 @@
     <PackageReference Include="Microsoft.ML.OnnxRuntime" Version="1.22.1" />
     <PackageReference Include="OpenCvSharp4" Version="4.13.0.20260627" />
     <PackageReference Include="OpenCvSharp4.runtime.win" Version="4.13.0.20260627" />
+    <PackageReference Include="System.IO.Ports" Version="8.0.0" />
   </ItemGroup>
 
   <!-- 相机控制托管程序集：复用 HikCameraManager 的 sdk\managed（随仓库分发，无需环境变量） -->

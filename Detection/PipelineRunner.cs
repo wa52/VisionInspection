@@ -32,7 +32,6 @@ public sealed class PipelineRunner : IDisposable
     public async Task<PipelineResult> RunOnceAsync(
         Pipeline pipeline,
         string imageName,
-        IoCommunicationSettings? cameraIoSettings = null,
         Action<IoCommunicationSettings>? cameraIoOutput = null)
     {
         ArgumentNullException.ThrowIfNull(pipeline);
@@ -41,7 +40,7 @@ public sealed class PipelineRunner : IDisposable
         {
             using var input = new Mat();
             var result = await Task.Run(
-                () => pipeline.Run(input, imageName, null, cameraIoSettings, cameraIoOutput));
+                () => pipeline.Run(input, imageName, null, cameraIoOutput));
             Completed?.Invoke(result);
             return result;
         }
@@ -55,7 +54,6 @@ public sealed class PipelineRunner : IDisposable
     public void StartContinuous(
         Pipeline pipeline,
         Func<string> imageNameFactory,
-        IoCommunicationSettings? cameraIoSettings = null,
         Action<IoCommunicationSettings>? cameraIoOutput = null)
     {
         ArgumentNullException.ThrowIfNull(pipeline);
@@ -87,7 +85,7 @@ public sealed class PipelineRunner : IDisposable
                         PipelineResult result;
                         try
                         {
-                            result = pipeline.Run(input, imageNameFactory(), null, cameraIoSettings, cameraIoOutput);
+                            result = pipeline.Run(input, imageNameFactory(), null, cameraIoOutput);
                         }
                         catch (Exception ex)
                         {

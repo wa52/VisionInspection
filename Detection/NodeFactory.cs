@@ -33,10 +33,14 @@ public static class NodeFactory
         Register("YOLO", (name, init) => new YoloNode(name, init));
         // 实例分割节点（u训练 yolo11-seg 标准导出 ONNX：best.onnx + classes.txt，output0 检测+掩码系数 + output1 proto）
         Register("Seg", (name, init) => new SegNode(name, init));
+        // 语义分割节点（u训练 task=semantic yolo26*-sem 导出 ONNX：best.onnx + classes.txt，[1,H,W] 像素类别索引图）
+        Register("SemanticSeg", (name, init) => new SemanticSegNode(name, init));
         // 轮廓匹配节点（基于边缘方向的形状模板匹配：shape_template.json 建模 + 金字塔由粗到细搜索）
         Register("ContourMatch", (name, init) => new ContourMatchNode(name, init));
         // 位置修正节点（读取定位节点 loc_* 契约位姿，驱动指定下游节点的 ROI 跟随工件）
         Register("PositionCorrection", (name, init) => new PositionCorrectionNode(name, init));
+        // 按键控制节点（绑定常用键位：程序空闲时按下 = 执行一次完整检测流程）
+        Register("KeyControl", (name, init) => new KeyControlNode(name, init));
         Register("OCR", (name, init) => new UnsupportedNode(name, "OCR"));
     }
 

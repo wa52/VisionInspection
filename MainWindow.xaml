@@ -1,49 +1,127 @@
-<Window x:Class="SpeakerVisionInspection.MainWindow"
+﻿<Window x:Class="SpeakerVisionInspection.MainWindow"
         xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
         xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+        xmlns:local="clr-namespace:SpeakerVisionInspection"
         Title="视觉检测平台" Height="920" Width="1560"
         WindowStartupLocation="CenterScreen" Closed="Window_Closed"
+        PreviewKeyDown="Window_PreviewKeyDown"
         Background="{StaticResource BgBrush}" Foreground="{StaticResource TextBrush}">
+    <Window.Resources>
+        <!-- 工具栏图标按钮：透明底无边框，悬停/按下由全局按钮模板触发 -->
+        <Style x:Key="ToolBarIconBtn" TargetType="Button" BasedOn="{StaticResource {x:Type Button}}">
+            <Setter Property="Width" Value="34" />
+            <Setter Property="Height" Value="30" />
+            <Setter Property="Padding" Value="0" />
+            <Setter Property="Margin" Value="2,0" />
+            <Setter Property="Background" Value="Transparent" />
+            <Setter Property="BorderBrush" Value="Transparent" />
+        </Style>
+    </Window.Resources>
+    <Window.CommandBindings>
+        <CommandBinding Command="ApplicationCommands.New" Executed="CmdRecipeNew_Executed" />
+        <CommandBinding Command="ApplicationCommands.Open" Executed="CmdRecipeOpen_Executed" />
+        <CommandBinding Command="ApplicationCommands.Save" Executed="CmdRecipeSave_Executed" />
+        <CommandBinding Command="ApplicationCommands.Undo" Executed="CmdUndo_Executed" CanExecute="CmdUndo_CanExecute" />
+        <CommandBinding Command="ApplicationCommands.Redo" Executed="CmdRedo_Executed" CanExecute="CmdRedo_CanExecute" />
+    </Window.CommandBindings>
     <Grid>
         <Grid.RowDefinitions>
-            <RowDefinition Height="Auto" />   <!-- 顶部工具栏 -->
+            <RowDefinition Height="Auto" />   <!-- 顶栏: 菜单栏 + 工具栏 -->
             <RowDefinition Height="*" />      <!-- 主区(相机|图像|参数) -->
             <RowDefinition Height="200" />    <!-- 底部面板(结果/日志) -->
             <RowDefinition Height="Auto" />   <!-- 状态栏 -->
         </Grid.RowDefinitions>
 
-        <!-- ===== 顶部工具栏 ===== -->
-        <Border Grid.Row="0" Background="{StaticResource PanelBrush}"
-                BorderBrush="{StaticResource BorderBrush}" BorderThickness="0,0,0,1">
-            <DockPanel Height="48" LastChildFill="False" Margin="10,0">
-                <TextBlock Text="方案" FontWeight="Bold" Foreground="{StaticResource MutedTextBrush}" VerticalAlignment="Center" Margin="0,0,8,0" />
-                <ComboBox x:Name="RecipeCombo" Width="200" Height="28" VerticalAlignment="Center" IsEditable="True" Margin="0,0,8,0" />
-                <Button Content="新建" Height="28" Margin="0,0,6,0" Padding="10,0" VerticalAlignment="Center" Click="RecipeNew_Click" />
-                <Button Content="打开" Height="28" Margin="0,0,6,0" Padding="10,0" VerticalAlignment="Center" Click="RecipeOpen_Click" />
-                <Button Content="保存" Height="28" Margin="0,0,6,0" Padding="10,0" VerticalAlignment="Center" Click="RecipeSave_Click" />
-                <Button Content="另存为" Height="28" Margin="0,0,10,0" Padding="10,0" VerticalAlignment="Center" Click="RecipeSaveAs_Click" />
-                <Rectangle Width="1" Fill="{StaticResource BorderBrush}" Margin="4,10" />
+        <StackPanel Grid.Row="0">
+            <!-- ===== 菜单栏（与工具栏分离）===== -->
+            <Menu Height="26" VerticalAlignment="Top">
+                <MenuItem Header="文件">
+                    <MenuItem Header="新建方案" Click="RecipeNew_Click" InputGestureText="Ctrl+N" />
+                    <MenuItem Header="打开方案" Click="RecipeOpen_Click" InputGestureText="Ctrl+O" />
+                    <MenuItem Header="保存方案" Click="RecipeSave_Click" InputGestureText="Ctrl+S" />
+                    <MenuItem Header="方案另存为" Click="RecipeSaveAs_Click" />
+                    <Separator />
+                    <MenuItem Header="退出" Click="MenuExit_Click" />
+                </MenuItem>
+            </Menu>
 
-                <Button x:Name="BtnRefreshCamera" Content="刷新相机" Height="28" Margin="6,0,6,0" Padding="10,0" VerticalAlignment="Center" Click="BtnRefreshCamera_Click" />
-                <Button x:Name="BtnConnect" Content="连接" Height="28" Margin="0,0,6,0" Padding="14,0" VerticalAlignment="Center" Click="BtnConnect_Click" IsEnabled="False" />
-                <Button x:Name="BtnDisconnect" Content="断开" Height="28" Margin="0,0,6,0" Padding="10,0" VerticalAlignment="Center" Click="BtnDisconnect_Click" IsEnabled="False" />
-                <Rectangle Width="1" Fill="{StaticResource BorderBrush}" Margin="4,10" />
+            <!-- ===== 工具栏（图标化，海康式）===== -->
+            <Border Background="{StaticResource PanelBrush}"
+                    BorderBrush="{StaticResource BorderBrush}" BorderThickness="0,0,0,1">
+                <DockPanel Height="42" LastChildFill="False" Margin="8,0">
+                    <Button Style="{StaticResource ToolBarIconBtn}" Click="RecipeNew_Click" ToolTip="新建方案 (Ctrl+N)">
+                        <Path Stroke="{StaticResource TextBrush}" StrokeThickness="1.7" StrokeStartLineCap="Round" StrokeEndLineCap="Round" StrokeLineJoin="Round"
+                              Data="M6,2 L14,2 L20,8 L20,22 L6,22 Z M14,2 L14,8 L20,8 M11,11 L11,19 M7,15 L15,15"
+                              Width="18" Height="18" Stretch="Uniform" />
+                    </Button>
+                    <Button Style="{StaticResource ToolBarIconBtn}" Click="RecipeOpen_Click" ToolTip="打开方案 (Ctrl+O)">
+                        <Path Stroke="{StaticResource TextBrush}" StrokeThickness="1.7" StrokeStartLineCap="Round" StrokeEndLineCap="Round" StrokeLineJoin="Round"
+                              Data="M2,5 L9,5 L11,7.5 L22,7.5 L22,20 L2,20 Z"
+                              Width="18" Height="18" Stretch="Uniform" />
+                    </Button>
+                    <Button Style="{StaticResource ToolBarIconBtn}" Click="RecipeSave_Click" ToolTip="保存方案 (Ctrl+S)">
+                        <Path Stroke="{StaticResource TextBrush}" StrokeThickness="1.7" StrokeStartLineCap="Round" StrokeEndLineCap="Round" StrokeLineJoin="Round"
+                              Data="M4,4 L16,4 L20,8 L20,20 L4,20 Z M8,4 L8,9 L16,9 L16,4 M8,20 L8,13 L16,13 L16,20"
+                              Width="18" Height="18" Stretch="Uniform" />
+                    </Button>
+                    <Button Style="{StaticResource ToolBarIconBtn}" Click="RecipeSaveAs_Click" ToolTip="方案另存为">
+                        <Path Stroke="{StaticResource TextBrush}" StrokeThickness="1.7" StrokeStartLineCap="Round" StrokeEndLineCap="Round" StrokeLineJoin="Round"
+                              Data="M8,2 L15,2 L19,6 L19,11 M5,7 L12,7 L16,11 L16,19 L5,19 Z"
+                              Width="18" Height="18" Stretch="Uniform" />
+                    </Button>
+                    <Rectangle Width="1" Fill="{StaticResource BorderBrush}" Margin="6,10" />
+                    <Button x:Name="BtnUndo" Style="{StaticResource ToolBarIconBtn}" Click="BtnUndo_Click" ToolTip="撤销上一步修改 (Ctrl+Z)" IsEnabled="False">
+                        <Path Stroke="{StaticResource TextBrush}" StrokeThickness="1.7" StrokeStartLineCap="Round" StrokeEndLineCap="Round" StrokeLineJoin="Round"
+                              Data="M8,5 L3,10 L8,15 M3,10 L14,10 C18,10 21,13 21,17 L21,20"
+                              Width="18" Height="18" Stretch="Uniform" />
+                    </Button>
+                    <Button x:Name="BtnRedo" Style="{StaticResource ToolBarIconBtn}" Click="BtnRedo_Click" ToolTip="恢复下一步修改 (Ctrl+Y)" IsEnabled="False">
+                        <Path Stroke="{StaticResource TextBrush}" StrokeThickness="1.7" StrokeStartLineCap="Round" StrokeEndLineCap="Round" StrokeLineJoin="Round"
+                              Data="M16,5 L21,10 L16,15 M21,10 L10,10 C6,10 3,13 3,17 L3,20"
+                              Width="18" Height="18" Stretch="Uniform" />
+                    </Button>
+                    <ToggleButton x:Name="BtnLock" Width="34" Height="30" Padding="0" Margin="2,0" Click="BtnLock_Click"
+                                  ToolTip="锁定方案：ROI 与节点结构不可修改（防误触；参数数值仍可调整）">
+                        <Path Stroke="{StaticResource TextBrush}" StrokeThickness="1.7" StrokeStartLineCap="Round" StrokeEndLineCap="Round" StrokeLineJoin="Round"
+                              Data="M2,4 L22,4 L22,20 L2,20 Z M8,11 L16,11 L16,17 L8,17 Z M10,11 L10,9 A2,2 0 0 1 14,9 L14,11"
+                              Width="18" Height="18" Stretch="Uniform" />
+                    </ToggleButton>
+                    <Rectangle Width="1" Fill="{StaticResource BorderBrush}" Margin="6,10" />
+                    <Button Style="{StaticResource ToolBarIconBtn}" Click="BtnCameraManager_Click" ToolTip="相机管理">
+                        <Path Stroke="{StaticResource TextBrush}" StrokeThickness="1.7" StrokeStartLineCap="Round" StrokeEndLineCap="Round" StrokeLineJoin="Round"
+                              Data="M2,7 L7,7 L9,4.5 L15,4.5 L17,7 L22,7 L22,19 L2,19 Z M12,9.5 A3.5,3.5 0 1 0 12.01,9.5"
+                              Width="18" Height="18" Stretch="Uniform" />
+                    </Button>
+                    <Button Style="{StaticResource ToolBarIconBtn}" Click="BtnCommManager_Click" ToolTip="通信管理">
+                        <Path Stroke="{StaticResource TextBrush}" StrokeThickness="1.7" StrokeStartLineCap="Round" StrokeEndLineCap="Round" StrokeLineJoin="Round"
+                              Data="M10,7.5 L7.5,5 A3.9,3.9 0 0 0 2.2,10.3 L4.7,12.8 M14,16.5 L16.5,19 A3.9,3.9 0 0 0 21.8,13.7 L19.3,11.2 M9,15 L15,9"
+                              Width="18" Height="18" Stretch="Uniform" />
+                    </Button>
+                    <Rectangle Width="1" Fill="{StaticResource BorderBrush}" Margin="6,10" />
 
-                <Button x:Name="BtnStartPreview" Content="预览" Height="28" Margin="6,0,6,0" Padding="10,0" VerticalAlignment="Center" Click="BtnStartPreview_Click" IsEnabled="False" />
-                <Button x:Name="BtnStopPreview" Content="停止预览" Height="28" Margin="0,0,6,0" Padding="10,0" VerticalAlignment="Center" Click="BtnStopPreview_Click" IsEnabled="False" />
-                <Button x:Name="BtnSoftTrigger" Content="软触发" Height="28" Margin="0,0,6,0" Padding="10,0" VerticalAlignment="Center" Click="BtnSoftTrigger_Click" IsEnabled="False" />
-                <Rectangle Width="1" Fill="{StaticResource BorderBrush}" Margin="4,10" />
+                    <TextBlock Text="方案" FontWeight="Bold" Foreground="{StaticResource MutedTextBrush}" VerticalAlignment="Center" Margin="0,0,8,0" />
+                    <ComboBox x:Name="RecipeCombo" Width="200" Height="28" VerticalAlignment="Center" IsEditable="True" Margin="0,0,8,0" />
+                    <Rectangle Width="1" Fill="{StaticResource BorderBrush}" Margin="4,10" />
 
-                <Button x:Name="BtnRunOnce" Content="单次执行" Height="28" Margin="6,0,6,0" Padding="16,0" VerticalAlignment="Center" FontWeight="Bold"
-                        Background="#2E5D36" Foreground="#E0E0E0" BorderBrush="#3D7A47" Click="BtnRunOnce_Click" IsEnabled="False" />
-                <Button x:Name="BtnRunContinuous" Content="连续执行" Height="28" Margin="0,0,8,0" Padding="16,0" VerticalAlignment="Center" FontWeight="Bold"
-                        Background="#1F4A6E" Foreground="#E0E0E0" BorderBrush="#2F6A9E" Click="BtnRunContinuous_Click" IsEnabled="False" />
+                    <Button x:Name="BtnRunOnce" Style="{StaticResource ToolBarIconBtn}" Background="#2E5D36" BorderBrush="#3D7A47"
+                            Click="BtnRunOnce_Click" IsEnabled="False" ToolTip="单次执行：执行一遍检测流程">
+                        <Path Stroke="#E0E0E0" StrokeThickness="1.7" StrokeStartLineCap="Round" StrokeEndLineCap="Round" StrokeLineJoin="Round"
+                              Data="M2,12 A10,10 0 1 0 22,12 A10,10 0 1 0 2,12 M10,8 L16.5,12 L10,16 Z"
+                              Width="18" Height="18" Stretch="Uniform" />
+                    </Button>
+                    <Button x:Name="BtnRunContinuous" Style="{StaticResource ToolBarIconBtn}" Background="#1F4A6E" BorderBrush="#2F6A9E" Margin="0,0,8,0"
+                            Click="BtnRunContinuous_Click" IsEnabled="False" ToolTip="连续执行：循环执行检测流程（再次点击停止）">
+                        <Path x:Name="RunContinuousIcon" Stroke="#E0E0E0" StrokeThickness="1.7" StrokeStartLineCap="Round" StrokeEndLineCap="Round" StrokeLineJoin="Round"
+                              Data="M21,4 L21,10 L15,10 M19.6,15 A8,8 0 1 1 17.7,6.6 L21,10"
+                              Width="18" Height="18" Stretch="Uniform" />
+                    </Button>
 
-                <TextBlock x:Name="FinalVerdictText" Text="待机" FontSize="17" FontWeight="Bold"
-                           HorizontalAlignment="Right" VerticalAlignment="Center" Margin="0,0,8,0"
-                           Foreground="{StaticResource MutedTextBrush}" />
-            </DockPanel>
-        </Border>
+                    <TextBlock x:Name="FinalVerdictText" Text="待机" FontSize="17" FontWeight="Bold"
+                               HorizontalAlignment="Right" VerticalAlignment="Center" Margin="0,0,8,0"
+                               Foreground="{StaticResource MutedTextBrush}" />
+                </DockPanel>
+            </Border>
+        </StackPanel>
 
         <!-- ===== 主区: 相机 | 图像 | 参数 ===== -->
         <Grid Grid.Row="1">
@@ -55,26 +133,9 @@
                 <ColumnDefinition Width="320" />
             </Grid.ColumnDefinitions>
 
-            <!-- 左: 相机 + 状态 -->
+            <!-- 左: 状态（相机枚举/连接/预览/触发在「相机管理」弹窗） -->
             <Border Grid.Column="0" Background="{StaticResource PanelBrush}" Margin="0,4,0,4">
                 <DockPanel>
-                    <GroupBox Header="相机列表" DockPanel.Dock="Top" Margin="6">
-                        <ListBox x:Name="CameraList" Height="140" Background="Transparent" SelectionChanged="CameraList_SelectionChanged">
-                            <ListBox.ItemTemplate>
-                                <DataTemplate>
-                                    <StackPanel>
-                                        <TextBlock Text="{Binding DisplayName}" FontWeight="Bold" />
-                                        <TextBlock FontSize="11" Foreground="#888">
-                                            <Run Text="{Binding InterfaceType, Mode=OneWay}" /><Run Text=" | " />
-                                            <Run Text="{Binding ModelName, Mode=OneWay}" /><Run Text=" | " />
-                                            <Run Text="{Binding IpAddress, Mode=OneWay}" />
-                                        </TextBlock>
-                                    </StackPanel>
-                                </DataTemplate>
-                            </ListBox.ItemTemplate>
-                        </ListBox>
-                    </GroupBox>
-
                     <GroupBox Header="生产状态" DockPanel.Dock="Top" Margin="6">
                         <StackPanel>
                             <StackPanel Orientation="Horizontal">
@@ -102,101 +163,37 @@
                         <StackPanel x:Name="ThumbStrip" Orientation="Horizontal" Margin="2" />
                     </ScrollViewer>
                     <Grid>
-                        <TextBlock x:Name="ResultCaption" Text="执行结果" HorizontalAlignment="Left" VerticalAlignment="Top" Margin="6" Foreground="{StaticResource MutedTextBrush}" FontSize="11" />
-                        <ToggleButton x:Name="BtnThumbToggle" Content="缩略图" Width="58" Height="20" HorizontalAlignment="Right" VerticalAlignment="Top" Margin="0,4,6,0" FontSize="11" Click="BtnThumbToggle_Click" ToolTip="显示/隐藏各节点图像缩略图条" />
+                        <!-- 叠放顺序：图片最底 → ROI 叠加层 → 标题/缩略图按钮置顶（否则结果图会盖住按钮导致点击失效） -->
                         <Image x:Name="ResultImage" Stretch="Uniform" Margin="2" />
                         <Canvas x:Name="RoiCanvas" Margin="2" Background="Transparent" IsHitTestVisible="False"
                                 MouseLeftButtonDown="RoiCanvas_MouseLeftButtonDown"
                                 MouseMove="RoiCanvas_MouseMove"
                                 MouseLeftButtonUp="RoiCanvas_MouseLeftButtonUp"
                                 MouseRightButtonUp="RoiCanvas_MouseRightButtonUp" />
+                        <TextBlock x:Name="ResultCaption" Text="执行结果" HorizontalAlignment="Left" VerticalAlignment="Top" Margin="6" Foreground="{StaticResource MutedTextBrush}" FontSize="11" />
+                        <ToggleButton x:Name="BtnThumbToggle" Content="缩略图" Width="58" Height="20" HorizontalAlignment="Right" VerticalAlignment="Top" Margin="0,4,6,0" FontSize="11" Click="BtnThumbToggle_Click" ToolTip="显示/隐藏各节点图像缩略图条" />
                     </Grid>
                 </DockPanel>
             </Border>
             <Rectangle Grid.Column="3" Fill="{StaticResource BorderBrush}" />
 
-            <!-- 右: 参数 Tab -->
+            <!-- 右: 节点状态 | 模块结果（相机配置在「相机管理」弹窗；IO 输出配置在「相机IO通信」节点弹窗） -->
             <Border Grid.Column="4" Background="{StaticResource PanelBrush}" Margin="0,4,0,4">
-                <TabControl>
-                    <TabItem Header="状态">
+                <TabControl Margin="0,6,0,0">
+                    <TabItem Header="节点状态">
                         <ScrollViewer VerticalScrollBarVisibility="Auto">
-                            <StackPanel x:Name="InspectorPanel" Margin="6" />
+                            <StackPanel x:Name="InspectorPanel" Margin="8" />
                         </ScrollViewer>
                     </TabItem>
-                    <TabItem Header="相机">
-                        <ScrollViewer VerticalScrollBarVisibility="Auto">
-                            <StackPanel Margin="8">
-                                <TextBlock Text="曝光时间 (us)" />
-                                <TextBox x:Name="ExposureBox" LostFocus="ParameterBox_LostFocus" />
-                                <TextBlock Text="增益" Margin="0,8,0,0" />
-                                <TextBox x:Name="GainBox" LostFocus="ParameterBox_LostFocus" />
-                                <TextBlock x:Name="GainRangeHint" Text="增益范围: 未连接" Foreground="Gray" FontSize="11" />
-                                <TextBlock Text="Gamma" Margin="0,8,0,0" />
-                                <TextBox x:Name="GammaBox" LostFocus="ParameterBox_LostFocus" />
-                                <TextBlock Text="像素格式" Margin="0,8,0,0" />
-                                <ComboBox x:Name="PixelFormatBox">
-                                    <ComboBoxItem Content="Mono8" />
-                                    <ComboBoxItem Content="RGB8" />
-                                </ComboBox>
-                            </StackPanel>
-                        </ScrollViewer>
-                    </TabItem>
-                    <TabItem Header="触发">
-                        <StackPanel Margin="8">
-                            <TextBlock Text="触发模式" />
-                            <ComboBox x:Name="TriggerModeBox" SelectionChanged="TriggerModeBox_SelectionChanged">
-                                <ComboBoxItem Content="连续" />
-                                <ComboBoxItem Content="软触发" />
-                                <ComboBoxItem Content="硬触发" />
-                            </ComboBox>
-                            <TextBlock Text="触发源" Margin="0,8,0,0" />
-                            <ComboBox x:Name="TriggerSourceBox" IsEnabled="False">
-                                <ComboBoxItem Content="Line0" />
-                            </ComboBox>
-                            <TextBlock Text="触发源固定 Line0（Line1/2 为输出线，不能同时作触发输入）" FontSize="11" Foreground="#888" Margin="0,4,0,0" TextWrapping="Wrap" />
-                            <TextBlock Text="触发沿" Margin="0,8,0,0" />
-                            <ComboBox x:Name="TriggerEdgeBox">
-                                <ComboBoxItem Content="上升沿" />
-                                <ComboBoxItem Content="下降沿" />
-                            </ComboBox>
-                            <TextBlock Text="取图超时 (ms)" Margin="0,8,0,0" />
-                            <TextBox x:Name="GrabTimeoutBox" LostFocus="TriggerSettingBox_LostFocus" />
-                            <TextBlock Text="最小触发间隔 (ms)" Margin="0,8,0,0" />
-                            <TextBox x:Name="TriggerIntervalBox" LostFocus="TriggerSettingBox_LostFocus" />
-                        </StackPanel>
-                    </TabItem>
-                    <TabItem Header="IO 输出">
-                        <StackPanel Margin="8">
-                            <TextBlock Text="结果输出" FontWeight="Bold" />
-                            <CheckBox x:Name="IoEnabledBox" Content="启用 IO 通信" Margin="0,8,0,0" Checked="IoCommunicationBox_Changed" Unchecked="IoCommunicationBox_Changed" />
-                            <TextBlock Text="输出模式" Margin="0,8,0,0" />
-                            <ComboBox x:Name="IoOutputModeBox" IsEnabled="False">
-                                <ComboBoxItem Content="NG 时输出" />
-                            </ComboBox>
-                            <TextBlock Text="Strobe 输出线" Margin="0,8,0,0" />
-                            <ComboBox x:Name="IoNgOutputLineBox" IsEditable="True">
-                                <ComboBoxItem Content="Line1" />
-                                <ComboBoxItem Content="Line2" />
-                                <ComboBoxItem Content="Line3" />
-                            </ComboBox>
-                            <TextBlock Text="Strobe 触发源" Margin="0,8,0,0" />
-                            <ComboBox x:Name="IoStrobeSourceBox" SelectionChanged="IoCommunicationBox_Changed">
-                                <ComboBoxItem Content="FrameTriggerWait" />
-                                <ComboBoxItem Content="FrameEndActive" />
-                                <ComboBoxItem Content="ExposureEndActive" />
-                                <ComboBoxItem Content="TimerActive" />
-                            </ComboBox>
-                            <TextBlock Text="有效电平" Margin="0,8,0,0" />
-                            <ComboBox x:Name="IoActiveLevelBox" SelectionChanged="IoCommunicationBox_Changed">
-                                <ComboBoxItem Content="高电平" />
-                                <ComboBoxItem Content="低电平" />
-                            </ComboBox>
-                            <TextBlock Text="脉冲时间 (ms)" Margin="0,8,0,0" />
-                            <TextBox x:Name="IoPulseMsBox" LostFocus="IoCommunicationBox_LostFocus" />
-                            <Button x:Name="BtnTestNgOutput" Content="测试 NG 输出" Margin="0,12,0,0" Click="BtnTestNgOutput_Click" IsEnabled="False" />
-                            <TextBlock x:Name="IoOutputStatusText" Text="状态: 未测试" Foreground="#888" Margin="0,8,0,0" TextWrapping="Wrap" />
-                            <TextBlock Text="说明: OK 时不输出；NG 时输出指定电平脉冲给 PLC。Line0 已作为触发输入，不建议作为输出。" Margin="0,8,0,0" Foreground="#888" TextWrapping="Wrap" />
-                        </StackPanel>
+                    <TabItem Header="模块结果">
+                        <Grid Margin="8,4,8,8">
+                            <Grid.RowDefinitions>
+                                <RowDefinition Height="Auto" />
+                                <RowDefinition Height="*" />
+                            </Grid.RowDefinitions>
+                            <TextBlock x:Name="ModuleResultTitle" Text="模块结果（在左侧流程选择节点）" FontWeight="Bold" TextTrimming="CharacterEllipsis" Margin="0,2,0,6" />
+                            <local:ModuleResultView x:Name="InspectorResultView" Grid.Row="1" />
+                        </Grid>
                     </TabItem>
                 </TabControl>
             </Border>

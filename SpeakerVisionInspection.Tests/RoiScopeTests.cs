@@ -51,10 +51,10 @@ public class RoiScopeTests
         };
         var roiIdx = new List<int> { 1, 2, 0 };
         var counts = new List<(string, int)> { ("范围", 1), ("内部项", 1), ("外部项", 1) };
-        var positives = new HashSet<string>();
+        var roiClassMap = new IReadOnlyList<string>[] { Array.Empty<string>(), Array.Empty<string>(), Array.Empty<string>() };
 
         var (outDets, outIdx, outCounts) = YoloNode.ApplyScopeFilter(
-            dets, roiIdx, counts, rois, 0, 1000, 1000, positives);
+            dets, roiIdx, counts, rois, 0, 1000, 1000, roiClassMap);
 
         Assert.Equal(2, outDets.Count);
         Assert.Equal(300, outDets[0].Cx);
@@ -72,7 +72,7 @@ public class RoiScopeTests
         var roiIdx = new List<int> { 0 };
         var counts = new List<(string, int)> { ("R", 1) };
         var rois = new List<(string, RoiRect)> { ("R", new RoiRect(0.1, 0.1, 0.2, 0.2, 0)) };
-        var (od, oi, oc) = YoloNode.ApplyScopeFilter(dets, roiIdx, counts, rois, -1, 1000, 1000, new HashSet<string>());
+        var (od, oi, oc) = YoloNode.ApplyScopeFilter(dets, roiIdx, counts, rois, -1, 1000, 1000, Array.Empty<IReadOnlyList<string>>());
         Assert.Same(dets, od);
         Assert.Same(roiIdx, oi);
         Assert.Same(counts, oc);
