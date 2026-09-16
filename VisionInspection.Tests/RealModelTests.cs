@@ -7,8 +7,8 @@ namespace VisionInspection.Tests;
 /// <summary>真实模型集成测试：模型文件缺失时静默跳过（绿色测试不证明数值一致性）。</summary>
 public class RealModelTests
 {
-    private static readonly string ModelDir =
-        @"D:\AiProjects\speaker-inspection\patchcore train\models\foam_patchcore";
+    private static readonly string ModelDir = Environment.GetEnvironmentVariable("VISION_INSPECTION_PATCHCORE_MODEL_DIR")
+        ?? Path.Combine(AppContext.BaseDirectory, "test-data", "patchcore");
 
     private static bool ModelExists =>
         File.Exists(Path.Combine(ModelDir, "model.onnx"))
@@ -77,8 +77,8 @@ public class RealModelTests
         Assert.True(result.NodeValues.ContainsKey("01 PatchCore"));
     }
 
-    private static readonly string SemanticModelDir =
-        @"D:\AiProjects\speaker-inspection\u训练\outputs\_test\e2e_semantic_run\weights";
+    private static readonly string SemanticModelDir = Environment.GetEnvironmentVariable("VISION_INSPECTION_SEMANTIC_MODEL_DIR")
+        ?? Path.Combine(AppContext.BaseDirectory, "test-data", "semantic");
 
     private static bool SemanticModelExists =>
         File.Exists(Path.Combine(SemanticModelDir, "best.onnx"))

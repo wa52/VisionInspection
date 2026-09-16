@@ -61,8 +61,8 @@ public sealed class RecipeDecision
 /// <summary>IO 与外部通信配置（沿用原 config.json 语义）。</summary>
 public sealed class RecipeIo
 {
-    public string InputDir { get; set; } = @"D:\vision\vm_input";
-    public string? ResultDir { get; set; } = @"D:\vision\vm_results";
+    public string InputDir { get; set; } = "vm_input";
+    public string? ResultDir { get; set; } = "vm_results";
     public int PollIntervalMs { get; set; } = 500;
     public bool MoveProcessed { get; set; } = false;
     public string ProcessedDir { get; set; } = "";

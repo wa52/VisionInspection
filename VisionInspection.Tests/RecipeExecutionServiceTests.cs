@@ -135,7 +135,7 @@ public class RecipeExecutionServiceTests : IDisposable
         var first = svc.CurrentPipeline;
         Assert.NotNull(first);
 
-        svc.HotApplyParam("03 YOLO", "model_dir", "D:\\somewhere");
+        svc.HotApplyParam("03 YOLO", "model_dir", Path.Combine(Path.GetTempPath(), "somewhere"));
         await svc.RunOnceAsync(); // 标脏后下一轮执行触发重建
         Assert.NotSame(first, svc.CurrentPipeline);
         first!.Dispose();

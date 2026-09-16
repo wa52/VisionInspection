@@ -144,8 +144,8 @@ public static class RecipeStore
             },
             Io = new RecipeIo
             {
-                InputDir = Str("input_dir") ?? @"D:\vision\vm_input",
-                ResultDir = Str("result_dir") ?? @"D:\vision\vm_results",
+                InputDir = Str("input_dir") ?? "vm_input",
+                ResultDir = Str("result_dir") ?? "vm_results",
                 PollIntervalMs = int.TryParse(Num("poll_interval_ms", "500"), out var pi) ? pi : 500,
                 MoveProcessed = Bool("move_processed", false),
                 ProcessedDir = Str("processed_dir") ?? "",

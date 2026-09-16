@@ -14,14 +14,14 @@ public sealed class SaveImageNode : IModelNode
     [
         new ParamDef { Key = "source", Label = "图像来源", Kind = "nodesource", Default = "@input" },
         new ParamDef { Key = "save_mode", Label = "检测结果保存类型", Kind = "choice", Default = "全部", Choices = ["全部", "仅OK", "仅NG", "不保存"] },
-        new ParamDef { Key = "dir", Label = "保存目录", Kind = "folder", Default = @"D:\vision\vm_output" },
+        new ParamDef { Key = "dir", Label = "保存目录", Kind = "folder", Default = "output" },
     ];
 
     private readonly Dictionary<string, string> _params = new()
     {
         ["source"] = "@input",
         ["save_mode"] = "全部",
-        ["dir"] = @"D:\vision\vm_output",
+        ["dir"] = "output",
     };
 
     /// <summary>失配/运行日志输出（由 Pipeline 注入 UI 日志）。</summary>
@@ -93,7 +93,9 @@ public sealed class SaveImageNode : IModelNode
         {
             // 保存到 dir\<判定>\<时间戳>_<源名>
             var sub = decision == "NG" ? "NG" : "OK";
-            var full = Path.GetFullPath(Path.Combine(dir, sub));
+            var full = Path.IsPathRooted(dir)
+                ? Path.GetFullPath(Path.Combine(dir, sub))
+                : Path.GetFullPath(Path.Combine(AppContext.BaseDirectory, dir, sub));
             Directory.CreateDirectory(full);
             var ts = DateTime.Now.ToString("yyyyMMdd_HHmmss_fff");
             var tag = source == "@input" ? "input" : source;

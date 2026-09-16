@@ -9,8 +9,8 @@ namespace VisionInspection.Tests;
 /// <summary>RoiRect/RoiGeometry 纯逻辑测试 + PatchCore ROI 检测集成测试（模型文件缺失时静默跳过）。</summary>
 public class PatchCoreRoiTests
 {
-    private static readonly string ModelDir =
-        @"D:\AiProjects\speaker-inspection\patchcore train\models\foam_patchcore";
+    private static readonly string ModelDir = Environment.GetEnvironmentVariable("VISION_INSPECTION_PATCHCORE_MODEL_DIR")
+        ?? Path.Combine(AppContext.BaseDirectory, "test-data", "patchcore");
 
     private static bool ModelExists =>
         File.Exists(Path.Combine(ModelDir, "model.onnx"))
@@ -303,11 +303,12 @@ public class PatchCoreRoiTests
     [Fact]
     public void ExpCut_GoodCrops_FromP7()
     {
-        var recipePath = @"D:\AiProjects\speaker-inspection\VisionInspection\bin\Debug\net8.0-windows\recipe.json";
+        var recipePath = Path.Combine(AppContext.BaseDirectory, "recipe.json");
         if (!File.Exists(recipePath)) return;
-        var srcDir = @"C:\Users\feng\Desktop\目标\数据\B7-02目标检测\图片数据\03-16\P7";
+        var srcDir = Environment.GetEnvironmentVariable("VISION_INSPECTION_P7_IMAGE_DIR")
+            ?? Path.Combine(AppContext.BaseDirectory, "test-data", "P7");
         if (!Directory.Exists(srcDir)) return;
-        var cropDir = @"C:\Users\feng\Desktop\扬声器\良品切图";
+        var cropDir = Path.Combine(Path.GetTempPath(), "VisionInspection", "good-crops");
         var cropDirOk = Path.Combine(cropDir, "OK");
         if (Directory.Exists(cropDirOk) && Directory.EnumerateFiles(cropDirOk, "*.jpg").Count() >= 50) return; // 已采集
 
@@ -346,9 +347,11 @@ public class PatchCoreRoiTests
     [Fact]
     public void ParityCheck_ModelsOK_OnSavedNgImage()
     {
-        var modelDir = @"D:\AiProjects\speaker-inspection\patchcore train\models\产线模型";
+        var modelDir = Environment.GetEnvironmentVariable("VISION_INSPECTION_PRODUCTION_MODEL_DIR")
+            ?? Path.Combine(AppContext.BaseDirectory, "test-data", "production-model");
         if (!File.Exists(Path.Combine(modelDir, "model.onnx"))) return; // 模型缺失时跳过
-        var ngDir = @"C:\Users\feng\Desktop\扬声器\良品切图\OK";
+        var ngDir = Environment.GetEnvironmentVariable("VISION_INSPECTION_GOOD_CROP_DIR")
+            ?? Path.Combine(AppContext.BaseDirectory, "test-data", "good-crops", "OK");
         if (!Directory.Exists(ngDir)) return;
 
         var files = Directory.EnumerateFiles(ngDir)

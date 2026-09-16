@@ -36,6 +36,8 @@ public class RecipeStoreTests : IDisposable
     [Fact]
     public void SaveAsDefault_Load_RoundTrip_PreservesParams()
     {
+        var imageDir = Path.Combine(Path.GetTempPath(), "VisionInspection", "some-image-dir");
+        var modelDir = Path.Combine(Path.GetTempPath(), "VisionInspection", "production-model");
         var recipe = new Recipe
         {
             Name = "功能测试方案",
@@ -47,7 +49,7 @@ public class RecipeStoreTests : IDisposable
                     Name = "01 图像源",
                     Type = "ImageSource",
                     Enabled = true,
-                    Params = new Dictionary<string, string> { ["dir"] = @"C:\some\dir" },
+                    Params = new Dictionary<string, string> { ["dir"] = imageDir },
                 },
                 new RecipeNode
                 {
@@ -56,7 +58,7 @@ public class RecipeStoreTests : IDisposable
                     Enabled = true,
                     Params = new Dictionary<string, string>
                     {
-                        ["model_dir"] = @"D:\AiProjects\speaker-inspection\patchcore train\models\产线模型",
+                        ["model_dir"] = modelDir,
                         ["source"] = "01 图像源",
                         ["roi"] = "0.5492,0.51,0.4098,0.52,0",
                         ["threshold"] = "",
@@ -72,9 +74,9 @@ public class RecipeStoreTests : IDisposable
         Assert.NotNull(loaded);
         var pc = loaded!.Nodes.FirstOrDefault(n => n.Type == "PatchCore");
         Assert.NotNull(pc);
-        Assert.Equal(@"D:\AiProjects\speaker-inspection\patchcore train\models\产线模型", pc!.Params["model_dir"]);
+        Assert.Equal(modelDir, pc!.Params["model_dir"]);
         Assert.Equal("0.5492,0.51,0.4098,0.52,0", pc.Params["roi"]);
-        Assert.Equal(@"C:\some\dir", loaded.Nodes[0].Params["dir"]);
+        Assert.Equal(imageDir, loaded.Nodes[0].Params["dir"]);
     }
 
     [Fact]
@@ -87,7 +89,9 @@ public class RecipeStoreTests : IDisposable
     public void Load_EnvOverride_WinsOverSavedModelDir()
     {
         // 产线脚本兼容：DEPLOY_MODEL_DIR 设置时覆盖第一个 PatchCore 节点的模型路径（保存值失效）
-        Environment.SetEnvironmentVariable("DEPLOY_MODEL_DIR", @"D:\env\override_model");
+        var overrideDir = Path.Combine(Path.GetTempPath(), "VisionInspection", "override-model");
+        var savedDir = Path.Combine(Path.GetTempPath(), "VisionInspection", "saved-model");
+        Environment.SetEnvironmentVariable("DEPLOY_MODEL_DIR", overrideDir);
         try
         {
             var recipe = new Recipe
@@ -101,7 +105,7 @@ public class RecipeStoreTests : IDisposable
                         Name = "01 PatchCore 检测",
                         Type = "PatchCore",
                         Enabled = true,
-                        Params = new Dictionary<string, string> { ["model_dir"] = @"D:\saved\model" },
+                        Params = new Dictionary<string, string> { ["model_dir"] = savedDir },
                     },
                 ],
             };
@@ -109,7 +113,7 @@ public class RecipeStoreTests : IDisposable
 
             var loaded = RecipeStore.Load(_dir);
             Assert.NotNull(loaded);
-            Assert.Equal(@"D:\env\override_model", loaded!.Nodes[0].Params["model_dir"]);
+            Assert.Equal(overrideDir, loaded!.Nodes[0].Params["model_dir"]);
         }
         finally
         {

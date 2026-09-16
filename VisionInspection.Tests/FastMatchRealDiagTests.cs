@@ -19,10 +19,11 @@ public class FastMatchRealDiagTests
         _output = output;
     }
 
-    private static readonly string TemplateDir =
-        @"D:\AiProjects\speaker-inspection\VisionInspection\bin\Debug\net8.0-windows\模板\08 快速匹配";
+    private static readonly string TemplateDir = Environment.GetEnvironmentVariable("VISION_INSPECTION_FASTMATCH_TEMPLATE_DIR")
+        ?? Path.Combine(AppContext.BaseDirectory, "模板", "08 快速匹配");
 
-    private static readonly string FrameDir = @"C:\Users\feng\Desktop\原图\1";
+    private static readonly string FrameDir = Environment.GetEnvironmentVariable("VISION_INSPECTION_TEST_FRAME_DIR")
+        ?? Path.Combine(AppContext.BaseDirectory, "test-data", "frames");
 
     private static readonly (double Cx, double Cy, double W, double H, double Angle) NodeRoi =
         (0.135, 0.5247, 0.2477, 0.551, 0);

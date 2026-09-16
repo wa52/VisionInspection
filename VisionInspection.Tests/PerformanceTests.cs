@@ -14,8 +14,8 @@ namespace VisionInspection.Tests;
 [Trait("Category", "Performance")]
 public class PerformanceTests : IDisposable
 {
-    private static readonly string ModelDir =
-        @"D:\AiProjects\speaker-inspection\patchcore train\models\foam_patchcore";
+    private static readonly string ModelDir = Environment.GetEnvironmentVariable("VISION_INSPECTION_PATCHCORE_MODEL_DIR")
+        ?? Path.Combine(AppContext.BaseDirectory, "test-data", "patchcore");
 
     private static bool ModelExists =>
         File.Exists(Path.Combine(ModelDir, "model.onnx"))

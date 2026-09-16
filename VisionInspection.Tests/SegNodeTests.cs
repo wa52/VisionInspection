@@ -7,7 +7,8 @@ namespace VisionInspection.Tests;
 /// <summary>YoloSegPostprocess 纯逻辑单测 + SegNode 真实 ONNX 冒烟测试（模型缺失时静默跳过）。</summary>
 public class SegNodeTests
 {
-    private const string ModelDir = @"D:\AiProjects\speaker-inspection\VisionInspection\bin\Debug\net8.0-windows\seg_test";
+    private static readonly string ModelDir = Environment.GetEnvironmentVariable("VISION_INSPECTION_SEG_MODEL_DIR")
+        ?? Path.Combine(AppContext.BaseDirectory, "test-data", "seg");
     private static bool ModelExists =>
         File.Exists(Path.Combine(ModelDir, "best.onnx")) && File.Exists(Path.Combine(ModelDir, "classes.txt"));
 
