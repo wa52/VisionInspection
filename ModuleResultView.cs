@@ -3,7 +3,7 @@ using System.Windows.Controls;
 using System.Windows.Data;
 using System.Windows.Media;
 
-namespace SpeakerVisionInspection;
+namespace VisionInspection;
 
 /// <summary>
 /// 模块结果视图（海康式「模块结果」面板，代码构建、深色主题）：
@@ -21,11 +21,15 @@ public sealed class ModuleResultView : Grid
         ["score"] = "分数",
         ["threshold"] = "阈值",
         ["count"] = "数量",
+        ["text"] = "文本",
+        ["conf"] = "置信度",
         ["det_all"] = "检出总数",
         ["classes"] = "类别",
         ["max_conf"] = "最高置信度",
         ["max_ratio"] = "最大占比",
         ["defect_pixels"] = "缺陷像素",
+        ["total_area"] = "总面积",
+        ["max_area"] = "最大面积",
         ["instances"] = "实例数",
         ["matches"] = "匹配个数",
         ["trigger_key"] = "触发键位",
@@ -36,9 +40,60 @@ public sealed class ModuleResultView : Grid
         ["loc_y"] = "定位点Y",
         ["loc_angle"] = "定位角度",
         ["loc_valid"] = "定位有效",
+        ["x1"] = "起点X",
+        ["y1"] = "起点Y",
+        ["x2"] = "终点X",
+        ["y2"] = "终点Y",
+        ["mid_x"] = "中点X",
+        ["mid_y"] = "中点Y",
+        ["center_x"] = "圆心X",
+        ["center_y"] = "圆心Y",
+        ["radius"] = "半径",
+        ["mean_contrast"] = "平均对比度",
         ["source_decision"] = "来源判定",
         ["emitted"] = "已输出脉冲",
         ["duration_ms"] = "脉冲宽度(ms)",
+        ["sent"] = "已发送",
+        ["resolved_text"] = "发送内容",
+        ["received"] = "已收到",
+        ["device"] = "通信设备",
+        ["timeout_ms"] = "接收超时(ms)",
+        ["abs_dist"] = "绝对距离",
+        ["inter_x"] = "交点X",
+        ["inter_y"] = "交点Y",
+        ["line1_angle"] = "直线1角度",
+        ["line2_angle"] = "直线2角度",
+        ["line1_x1"] = "直线1起点X",
+        ["line1_y1"] = "直线1起点Y",
+        ["line1_x2"] = "直线1终点X",
+        ["line1_y2"] = "直线1终点Y",
+        ["line2_x1"] = "直线2起点X",
+        ["line2_y1"] = "直线2起点Y",
+        ["line2_x2"] = "直线2终点X",
+        ["line2_y2"] = "直线2终点Y",
+        ["dist"] = "距离",
+        ["foot_x"] = "垂足X",
+        ["foot_y"] = "垂足Y",
+        ["inter1_x"] = "交点1X",
+        ["inter1_y"] = "交点1Y",
+        ["inter2_x"] = "交点2X",
+        ["inter2_y"] = "交点2Y",
+        ["line_angle"] = "测量直线角度",
+        ["relation"] = "位置关系",
+        ["c1_x"] = "圆1圆心X",
+        ["c1_y"] = "圆1圆心Y",
+        ["c1_r"] = "圆1半径",
+        ["c2_x"] = "圆2圆心X",
+        ["c2_y"] = "圆2圆心Y",
+        ["c2_r"] = "圆2半径",
+        ["center_dist"] = "中心距离",
+        ["closest_dist"] = "最近距离",
+        ["farthest_dist"] = "最远距离",
+        ["point_x"] = "测量点X",
+        ["point_y"] = "测量点Y",
+        ["circle_x"] = "圆心X",
+        ["circle_y"] = "圆心Y",
+        ["fail_checks"] = "未过判定项",
         ["out_w"] = "图像宽度",
         ["out_h"] = "图像高度",
         ["current_file"] = "当前图像",
@@ -60,9 +115,10 @@ public sealed class ModuleResultView : Grid
     {
         RowDefinitions.Add(new RowDefinition { Height = GridLength.Auto });
         RowDefinitions.Add(new RowDefinition { Height = new GridLength(1, GridUnitType.Star) });
-        var tabs = new TabControl { Height = 188 };
-        tabs.Items.Add(new TabItem { Header = "当前结果", Content = new ScrollViewer { Content = _currentGrid } });
-        tabs.Items.Add(new TabItem { Header = "历史结果", Content = new ScrollViewer { Content = _historyGrid, HorizontalScrollBarVisibility = ScrollBarVisibility.Auto } });
+        // DataGrid 自带滚动条——外层不能再套 ScrollViewer（横向滚动会给 Grid 无限宽度度量，Star 列塌缩、列头互叠）
+        var tabs = new TabControl { MinHeight = 188 };
+        tabs.Items.Add(new TabItem { Header = "当前结果", Content = _currentGrid });
+        tabs.Items.Add(new TabItem { Header = "历史结果", Content = _historyGrid });
         SetRow(_treeGrid, 0);
         SetRow(tabs, 1);
         Children.Add(_treeGrid);
@@ -201,6 +257,7 @@ public sealed class ModuleResultView : Grid
             Header = "模块数据",
             Binding = new Binding("Summary"),
             Width = new DataGridLength(1, DataGridLengthUnitType.Star),
+            MinWidth = 120,
         });
         for (var i = history.Count - 1; i >= 0; i--)
         {
@@ -221,7 +278,27 @@ public sealed class ModuleResultView : Grid
     public static string DisplayName(string key)
     {
         if (LabelMap.TryGetValue(key, out var label)) return label;
-        if (key.StartsWith("roi_", StringComparison.Ordinal)) return "检测项 " + key[4..];
+        if (key.StartsWith("roi_", StringComparison.Ordinal))
+        {
+            // roi_{名} → 检测项 名；roi_{名}_text/conf/match → 检测项 名·识别文本/置信度/匹配（字符识别节点）
+            var rest = key[4..];
+            var sep = rest.LastIndexOf('_');
+            if (sep > 0)
+            {
+                var field = rest[(sep + 1)..];
+                var fieldName = field switch
+                {
+                    "text" => "识别文本",
+                    "conf" => "置信度",
+                    "match" => "匹配",
+                    "area" => "最大面积",
+                    "total" => "总面积",
+                    _ => null,
+                };
+                if (fieldName != null) return $"检测项 {rest[..sep]}·{fieldName}";
+            }
+            return "检测项 " + rest;
+        }
         if (key.StartsWith("match_", StringComparison.Ordinal))
         {
             var rest = key[6..];

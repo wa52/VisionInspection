@@ -3,7 +3,7 @@ using System.Windows.Threading;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Hosting;
 
-namespace SpeakerVisionInspection;
+namespace VisionInspection;
 
 public partial class App : Application
 {

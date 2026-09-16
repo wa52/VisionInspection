@@ -1,7 +1,7 @@
 using System.IO;
 using System.Text.Json;
 
-namespace SpeakerVisionInspection.Camera;
+namespace VisionInspection.Camera;
 
 /// <summary>相机采集参数持久化（JSON 文件）。</summary>
 public sealed class CameraParameterStore

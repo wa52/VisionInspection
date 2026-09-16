@@ -3,19 +3,20 @@ using System.Text.Json;
 using System.Text.Json.Serialization;
 using System.Threading.Channels;
 using OpenCvSharp;
-using SpeakerVisionInspection.Camera;
-using SpeakerVisionInspection.Detection;
-using SpeakerVisionInspection.Models;
-using SpeakerVisionInspection.Plc;
-using SpeakerVisionInspection.Services;
-using SpeakerVisionInspection.Trigger;
+using VisionInspection.Camera;
+using VisionInspection.Comm;
+using VisionInspection.Detection;
+using VisionInspection.Models;
+using VisionInspection.Plc;
+using VisionInspection.Services;
+using VisionInspection.Trigger;
 
-namespace SpeakerVisionInspection.Production;
+namespace VisionInspection.Production;
 
 /// <summary>
 /// 生产编排服务：把「相机硬触发帧 → 多模型流水线检测 → 最终 OK/NG → PLC/IO 输出」串成闭环。
 /// - 帧缓冲在事件线程同步拷贝（相机缓冲事件后即释放），工作线程异步转换 + 推理，不阻塞采集。
-/// - 有界队列（容量 1）：Busy 期间到达的触发帧记为溢出（TriggerStateMachine.OverrunCount），不无限排队。
+/// - 有界 FIFO 队列：Busy 期间到达的触发帧先排队，队列满时才记为溢出，避免 IO 脉冲期间无谓丢帧。
 /// - PLC 语义：Ready（等待触发）→ Busy（处理中）→ OK/NG → Ready；错误 → Error。
 /// - NG 时输出相机 IO 脉冲（Line 输出给 PLC）。
 /// </summary>
@@ -27,20 +28,20 @@ public sealed class CameraInspectionService : IDisposable
     private readonly Func<TriggerSettings> _getTriggerSettings;
     private readonly Action<string> _log;
     private readonly string _resultDir;
+    private readonly ICommRuntime? _commRuntime;
 
     private readonly TriggerStateMachine _state = new();
     private readonly Channel<FrameSnapshot> _queue = Channel.CreateBounded<FrameSnapshot>(
-        new BoundedChannelOptions(1)
+        new BoundedChannelOptions(16)
         {
-            FullMode = BoundedChannelFullMode.DropWrite,
+            FullMode = BoundedChannelFullMode.Wait,
             SingleReader = true,
             SingleWriter = false,
         });
     private readonly CancellationTokenSource _cts = new();
     private readonly object _jsonLock = new();
     private Task? _worker;
-    private DateTime? _triggerDetectedAt;
-    private DateTime _lastTriggerAt = DateTime.MinValue;
+    private long _triggerDetectedAtTicks;
     private bool _disposed;
 
     public CameraInspectionService(
@@ -49,7 +50,8 @@ public sealed class CameraInspectionService : IDisposable
         Pipeline pipeline,
         Func<TriggerSettings> getTriggerSettings,
         string resultDir,
-        Action<string>? log = null)
+        Action<string>? log = null,
+        ICommRuntime? commRuntime = null)
     {
         _camera = camera;
         _plc = plc;
@@ -57,6 +59,7 @@ public sealed class CameraInspectionService : IDisposable
         _getTriggerSettings = getTriggerSettings;
         _resultDir = resultDir;
         _log = log ?? (_ => { });
+        _commRuntime = commRuntime;
 
         _camera.FrameReceived += Camera_FrameReceived;
         _camera.TriggerDetected += Camera_TriggerDetected;
@@ -73,7 +76,10 @@ public sealed class CameraInspectionService : IDisposable
     /// <summary>最近一次错误原因（状态机 LastError 转发）。</summary>
     public string? LastError => _state.LastError;
 
-    public event Action<DetectionResult, Mat?, float[,]?, Mat?>? Preview;
+    /// <summary>Busy 期间溢出触发计数（累计；UI 状态栏显示用）。</summary>
+    public int OverrunCount => _state.OverrunCount;
+
+    public event Action<DetectionResult, Mat?, float[,]?, IReadOnlyDictionary<string, Mat>>? Preview;
     public event Action<DetectionResult>? Result;
     public event Action<TriggerState>? StateChanged;
 
@@ -101,30 +107,6 @@ public sealed class CameraInspectionService : IDisposable
 
     private void Camera_FrameReceived(object? sender, CameraFrameEventArgs e)
     {
-        // 仅在生产状态（Armed/Busy）处理触发帧；预览/软触发帧不进检测链路。
-        if (_state.State is not (TriggerState.Armed or TriggerState.Busy))
-        {
-            return;
-        }
-
-        // 事件线程同步拷贝相机缓冲（事件返回后缓冲即被控制器释放）。
-        var frame = e.Frame;
-        var data = new byte[frame.DataLength];
-        System.Runtime.InteropServices.Marshal.Copy(frame.Data, data, 0, frame.DataLength);
-        var snapshot = new FrameSnapshot(data, frame.Width, frame.Height, frame.PixelFormat);
-
-        // 最小触发间隔校验（过快触发记溢出）。
-        var now = DateTime.UtcNow;
-        var minInterval = _getTriggerSettings().MinTriggerIntervalMs;
-        var tooFast = minInterval > 0 && (now - _lastTriggerAt).TotalMilliseconds < minInterval;
-        _lastTriggerAt = now;
-        if (tooFast)
-        {
-            _log($"[生产] 触发间隔过短（{minInterval:F0}ms 内重复触发）");
-            _ = _plc.SendErrorAsync("TRIGGER_TOO_FAST");
-            return;
-        }
-
         // 溢出自愈：Error 态收到有效触发帧即恢复等待。
         if (_state.State == TriggerState.Error)
         {
@@ -133,7 +115,15 @@ public sealed class CameraInspectionService : IDisposable
             RaiseStateChanged();
         }
 
-        if (!_state.TriggerReceived())
+        // 仅在生产状态（Armed/Busy）处理触发帧；预览/软触发帧不进检测链路。
+        if (_state.State is not (TriggerState.Armed or TriggerState.Busy))
+        {
+            return;
+        }
+
+        // 第一帧负责把状态切到 Busy；Busy 期间的帧进入 FIFO，不能因为上一帧的
+        // 检测或 IO 脉冲尚未结束就直接丢弃。
+        if (_state.State == TriggerState.Armed && !_state.TriggerReceived())
         {
             _log($"[生产] 触发溢出: {_state.LastError}");
             if (_state.State != TriggerState.Error)
@@ -144,10 +134,21 @@ public sealed class CameraInspectionService : IDisposable
             return;
         }
 
+        // 触发帧被接受后立即通知 BUSY，不等待图像拷贝、线程池调度或检测算法。
+        Interlocked.Exchange(ref _triggerDetectedAtTicks, 0);
+        _ = _plc.SendBusyAsync();
         RaiseStateChanged();
+
+        // 事件线程同步拷贝相机缓冲（事件返回后缓冲即被控制器释放）。
+        var frame = e.Frame;
+        var data = new byte[frame.DataLength];
+        System.Runtime.InteropServices.Marshal.Copy(frame.Data, data, 0, frame.DataLength);
+        var snapshot = new FrameSnapshot(data, frame.Width, frame.Height, frame.PixelFormat);
+
         if (!_queue.Writer.TryWrite(snapshot))
         {
-            _log("[生产] 处理队列已满，丢弃本帧");
+            _state.TriggerReceived(); // Busy 状态下仅累计溢出，不改变当前处理状态
+            _log($"[生产] 处理队列已满，丢弃本帧（累计溢出 {_state.OverrunCount}）");
         }
     }
 
@@ -173,28 +174,38 @@ public sealed class CameraInspectionService : IDisposable
     {
         try
         {
-            _ = _plc.SendBusyAsync();
             using var bgr = CameraFrameMatConverter.ToBgrMat(snapshot.Data, snapshot.Width, snapshot.Height, snapshot.PixelFormat);
             var imageName = $"CAM_{DateTime.Now:yyyyMMdd_HHmmss_fff}";
             var pr = _pipeline.Run(
                 bgr,
                 imageName,
-                cameraIoOutput: settings => _camera.PulseNgOutputAsync(settings).GetAwaiter().GetResult());
+                cameraIoOutput: settings => _camera.PulseNgOutputAsync(settings).GetAwaiter().GetResult(),
+                commRuntime: _commRuntime);
             var result = ToDetectionResult(pr);
 
             _log($"[检测] {imageName} -> {result.Decision} (节点={result.NodeDetails.Count})");
             Result?.Invoke(result);
-            Preview?.Invoke(result, bgr.Clone(), pr.HeatMap, pr.DisplayImage);
-            // 未交给 Preview 的节点图像由本服务释放（DisplayImage 由订阅方负责）
-            foreach (var kv in pr.NodeImages)
+            if (Preview is { } preview)
             {
-                if (!ReferenceEquals(kv.Value, pr.DisplayImage)) kv.Value.Dispose();
+                // 预览订阅方负责转换并释放节点图像；硬触发结果也因此能更新缩略图。
+                preview(result, bgr.Clone(), pr.HeatMap, pr.NodeImages);
+            }
+            else
+            {
+                foreach (var image in pr.NodeImages.Values)
+                {
+                    image.Dispose();
+                }
             }
             WriteLocalJson(result);
 
             await _plc.SendResultAsync(result.Decision == "NG" ? PlcResult.Ng : PlcResult.Ok);
 
-            _state.FrameProcessed();
+            // 队列仍有待处理帧时保持 Busy，直到最后一帧完成再回 Ready。
+            if (!_queue.Reader.TryPeek(out _))
+            {
+                _state.FrameProcessed();
+            }
         }
         catch (Exception ex)
         {
@@ -210,7 +221,7 @@ public sealed class CameraInspectionService : IDisposable
 
     private void Camera_TriggerDetected(object? sender, EventArgs e)
     {
-        _triggerDetectedAt = DateTime.UtcNow;
+        Interlocked.Exchange(ref _triggerDetectedAtTicks, DateTime.UtcNow.Ticks);
         if (_state.State == TriggerState.Error)
         {
             _log($"[生产] 从错误恢复（{_state.LastError ?? "未知"}），重新等待触发");
@@ -222,13 +233,15 @@ public sealed class CameraInspectionService : IDisposable
     private void Camera_TriggerWaitTimeout(object? sender, EventArgs e)
     {
         // 仅 Armed 且已检测到触发（FrameStart）后超时仍无帧才报取图超时；Waiting Trigger 无限停留。
-        if (_state.State != TriggerState.Armed || _triggerDetectedAt is null)
+        var detectedAtTicks = Interlocked.Read(ref _triggerDetectedAtTicks);
+        if (_state.State != TriggerState.Armed || detectedAtTicks == 0)
         {
             return;
         }
 
         var grabTimeout = _getTriggerSettings().GrabTimeoutMs;
-        if ((DateTime.UtcNow - _triggerDetectedAt.Value).TotalMilliseconds < grabTimeout)
+        var detectedAt = new DateTime(detectedAtTicks, DateTimeKind.Utc);
+        if ((DateTime.UtcNow - detectedAt).TotalMilliseconds < grabTimeout)
         {
             return;
         }
@@ -259,11 +272,14 @@ public sealed class CameraInspectionService : IDisposable
             pr.Image, double.NaN, pr.Threshold, pr.Decision, pr.ProcessedAt, pr.Error)
         {
             NodeDetails = pr.NodeValues,
+            NodeAnnotations = pr.NodeAnnotations,
         };
-        if (pr.NodeValues.TryGetValue(pr.NodeValues.Keys.FirstOrDefault() ?? "", out var first)
-            && first.TryGetValue("score", out var sc) && double.TryParse(sc, out var score))
+        foreach (var values in pr.NodeValues.Values)
         {
-            return d with { Score = score };
+            if (values.TryGetValue("score", out var sc) && double.TryParse(sc, out var score))
+            {
+                return d with { Score = score };
+            }
         }
         return d;
     }

@@ -3,10 +3,10 @@ using System.Text;
 using Microsoft.ML.OnnxRuntime;
 using Microsoft.ML.OnnxRuntime.Tensors;
 using OpenCvSharp;
-using SpeakerVisionInspection.Models;
-using SpeakerVisionInspection.Services;
+using VisionInspection.Models;
+using VisionInspection.Services;
 
-namespace SpeakerVisionInspection.Detection;
+namespace VisionInspection.Detection;
 
 /// <summary>
 /// 实例分割节点（Ultralytics yolo11-seg 标准导出 ONNX）。
@@ -29,7 +29,7 @@ public sealed class SegNode : IModelNode
         new ParamDef { Key = "iou", Label = "NMS IoU阈值", Kind = "double", Default = "0.45" },
         new ParamDef { Key = "decision_mode", Label = "判定模式", Kind = "choice", Default = DecisionRatioNg, Choices = [DecisionRatioNg, DecisionDetectNg, DecisionMissingNg] },
         new ParamDef { Key = "crop_dir", Label = "缺陷区切图保存目录(可选·按OK/NG分目录)", Kind = "folder", Default = "" },
-        new ParamDef { Key = "save_mode", Label = "整图保存", Kind = "choice", Default = "全部", Choices = ["全部", "仅OK", "仅NG"] },
+        new ParamDef { Key = "save_mode", Label = "缺陷区切图保存类型", Kind = "choice", Default = "全部", Choices = ["全部", "仅OK", "仅NG", "不保存"] },
         new ParamDef { Key = "scope_index", Label = "总范围ROI索引(检测项管理设置)", Kind = "hidden", Default = "-1" },
     ];
 
@@ -165,9 +165,15 @@ public sealed class SegNode : IModelNode
             throw new InvalidOperationException($"节点 {Name}: 输入图像为空（单次/连续执行请把「图像来源」指向图像源节点）");
         }
 
-        // ROI 解析：节点私有 own_rois（含检测项元数据）+ 位置修正；空 = 全图检测。
+        // ROI 解析：节点私有 own_rois（含检测项元数据）+ 位置修正；必须配置检测项 ROI。
         // 检测项名 ↔ 模型类名匹配：名字命中的检测项只判该类；未命中/无检测项按全部非背景类别判定（不再使用「关注类别」参数）
         var (rois, metas) = ResolveRoisFull(img, ctx);
+        if (rois.Count == 0)
+        {
+            const string error = "未解析到有效检测项 ROI，已停止实例分割（请在本节点「检测项管理」中添加并启用检测项 ROI）";
+            Log?.Invoke($"[ROI] {Name}: {error}");
+            return new NodeResult { Decision = "ERROR", Error = error, OutputImage = img.Clone() };
+        }
         foreach (var (name, _) in rois)
         {
             if (!string.IsNullOrWhiteSpace(name) && PositiveClasses.MatchClassesForRoi(name, _classNames).Count == 0)
@@ -207,30 +213,21 @@ public sealed class SegNode : IModelNode
         }
 
         var cropRects = new List<Rect>();
-        if (rois.Count == 0)
+        for (var ri = 0; ri < rois.Count; ri++)
         {
-            roiActive.Add(true);
-            defectPixels += SegmentRegion(normalized, new Rect(0, 0, img.Width, img.Height), "", defectMask, instances, regionRatios, new RoiMeta(), 0);
-            cropRects.Add(new Rect(0, 0, img.Width, img.Height));
-        }
-        else
-        {
-            for (var ri = 0; ri < rois.Count; ri++)
+            var (name, rect) = rois[ri];
+            var meta = ri < metas.Count ? metas[ri] : new RoiMeta();
+            var (cx, cy, w, h, angle) = rect.ToPixels(img.Width, img.Height);
+            var cropRect = YoloNode.ComputeRoiCropRect((int)cx, (int)cy, w, h, angle, img.Width, img.Height);
+            cropRects.Add(cropRect);
+            if (!meta.Enabled)
             {
-                var (name, rect) = rois[ri];
-                var meta = ri < metas.Count ? metas[ri] : new RoiMeta();
-                var (cx, cy, w, h, angle) = rect.ToPixels(img.Width, img.Height);
-                var cropRect = YoloNode.ComputeRoiCropRect((int)cx, (int)cy, w, h, angle, img.Width, img.Height);
-                cropRects.Add(cropRect);
-                if (!meta.Enabled)
-                {
-                    roiActive.Add(false);
-                    regionRatios.Add((name, -1)); // 停用：不检测
-                    continue;
-                }
-                roiActive.Add(true);
-                defectPixels += SegmentRegion(normalized, cropRect, name, defectMask, instances, regionRatios, meta, ri);
+                roiActive.Add(false);
+                regionRatios.Add((name, -1)); // 停用：不检测
+                continue;
             }
+            roiActive.Add(true);
+            defectPixels += SegmentRegion(normalized, cropRect, name, defectMask, instances, regionRatios, meta, ri, rect);
         }
 
         // 总范围过滤：缺陷掩码 AND 总范围；实例按中心点保留；范围外 ROI 占比按过滤后掩码重算
@@ -268,9 +265,6 @@ public sealed class SegNode : IModelNode
 
         // 切图：缺陷区裁剪保存（检测项级「是否存图」过滤）；目录未配置时记日志
         SaveDefectCrops(img, defectMask, instances, decision);
-
-        // 整图留存：按本节点判定把原图存到 crop_dir\OK|NG（save_mode = all/ok/ng）
-        SaveWholeImage(img, decision);
 
         var nodeResult = new NodeResult
         {
@@ -337,7 +331,7 @@ public sealed class SegNode : IModelNode
     private long SegmentRegion(
         Mat img, Rect region, string roiName,
         Mat defectMaskFull, List<SegInstance> instances, List<(string Name, double Percent)> regionRatios,
-        RoiMeta meta, int roiIndex)
+        RoiMeta meta, int roiIndex, RoiRect? preciseRoi)
     {
         // 检测项名 ↔ 模型类名匹配：命中 → 该项只判该类；未命中/全图 → 全部非背景类别
         var roiClasses = PositiveClasses.MatchClassesForRoi(roiName, _classNames);
@@ -443,6 +437,12 @@ public sealed class SegNode : IModelNode
             var box = ClampRect(
                 (int)Math.Round(mcx - mw / 2), (int)Math.Round(mcy - mh / 2),
                 (int)Math.Round(mw), (int)Math.Round(mh), region.Width, region.Height);
+            if (preciseRoi.HasValue && !NodeRois.ContainsPixel(
+                preciseRoi.Value, box.X + region.X + box.Width / 2.0, box.Y + region.Y + box.Height / 2.0,
+                defectMaskFull.Width, defectMaskFull.Height))
+            {
+                continue;
+            }
             if (triggered)
             {
                 using var m = BuildInstanceMask(d.Coeffs, protoData, protoH, protoW, (int)dx, (int)dy, contentW, contentH, region.Size, box);
@@ -458,6 +458,19 @@ public sealed class SegNode : IModelNode
                 triggered, roiName, roiIndex, meta.SaveImage));
         }
 
+        long area;
+        if (preciseRoi.HasValue)
+        {
+            using var preciseMask = NodeRois.CreateMask(preciseRoi.Value, defectMaskFull.Width, defectMaskFull.Height);
+            using var preciseCrop = new Mat(preciseMask, region);
+            area = Cv2.CountNonZero(preciseCrop);
+            Cv2.BitwiseAnd(defectCrop, preciseCrop, defectCrop);
+        }
+        else
+        {
+            area = (long)region.Width * region.Height;
+        }
+
         // 并入全图缺陷掩码（就地 OR）
         using (var cropRoi = new Mat(defectMaskFull, region))
         {
@@ -465,7 +478,6 @@ public sealed class SegNode : IModelNode
         }
 
         var pixels = Cv2.CountNonZero(defectCrop);
-        var area = (long)region.Width * region.Height;
         var percent = area > 0 ? pixels * 100.0 / area : 0.0;
         regionRatios.Add((roiName, percent));
         return pixels;
@@ -593,6 +605,7 @@ public sealed class SegNode : IModelNode
     /// <summary>缺陷区切图：crop_dir\OK|NG\时间戳_类别_序号.jpg + sidecar（类别/置信度/框/ROI 名/时间）。</summary>
     private void SaveDefectCrops(Mat img, Mat defectMask, List<SegInstance> instances, string decision)
     {
+        if (!SaveImageNode.ShouldSave(_params.GetValueOrDefault("save_mode"), decision)) return;
         var dir = _params.GetValueOrDefault("crop_dir");
         if (string.IsNullOrWhiteSpace(dir))
         {
@@ -646,31 +659,6 @@ public sealed class SegNode : IModelNode
             {
                 Log?.Invoke($"[切图] {Name}: 保存失败: {ex.Message}");
             }
-        }
-    }
-
-    /// <summary>整图留存：按本节点判定把原图存到 crop_dir\OK|NG（save_mode = all/ok/ng）。失败只记日志不中断。</summary>
-    private void SaveWholeImage(Mat img, string decision)
-    {
-        if (!SaveImageNode.ShouldSave(_params.GetValueOrDefault("save_mode"), decision)) return;
-        var dir = _params.GetValueOrDefault("crop_dir");
-        if (string.IsNullOrWhiteSpace(dir))
-        {
-            Log?.Invoke($"[整图] {Name}: 整图保存已启用(保存类型={_params.GetValueOrDefault("save_mode")})但未配置「缺陷区切图保存目录」(crop_dir)，本次不保存");
-            return;
-        }
-        try
-        {
-            var sub = decision == "NG" ? "NG" : "OK";
-            var full = Path.GetFullPath(Path.Combine(dir, sub));
-            Directory.CreateDirectory(full);
-            var outPath = Path.Combine(full, $"{DateTime.Now:yyyyMMdd_HHmmss_fff}_{Name}.jpg");
-            Cv2.ImWrite(outPath, img);
-            Log?.Invoke($"[整图] {Name}: 已保存 {sub} 整图 -> {outPath}");
-        }
-        catch (Exception ex)
-        {
-            Log?.Invoke($"[整图] {Name}: 整图保存失败: {ex.Message}");
         }
     }
 

@@ -1,7 +1,7 @@
 using System.IO;
 using System.Text.Json;
 
-namespace SpeakerVisionInspection.Services;
+namespace VisionInspection.Services;
 
 public static class VisionMasterConfigResolver
 {

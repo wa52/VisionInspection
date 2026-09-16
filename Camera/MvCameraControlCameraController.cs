@@ -1,9 +1,9 @@
 using System.IO;
 using System.Runtime.InteropServices;
-using SpeakerVisionInspection.Services;
+using VisionInspection.Services;
 using MvCamCtrl.NET;
 
-namespace SpeakerVisionInspection.Camera;
+namespace VisionInspection.Camera;
 
 /// <summary>
 /// 基于 MvCameraControl.Net（海康 MVS 相机控制）的相机控制器。
@@ -502,13 +502,8 @@ public sealed class MvCameraControlCameraController : ICameraController
                     throw new InvalidOperationException("连续预览中，请先停止预览再硬触发");
                 }
 
-                var ret = _camera.MV_CC_StartGrabbing_NET();
-                if (ret != 0)
-                {
-                    throw new InvalidOperationException($"开始硬触发采集失败（错误码 {ret}）");
-                }
-
                 // 注册 FrameStart 事件回调：PLC 触发 → 相机曝光 → 触发 TriggerDetected（超时计时锚点）。
+                // 必须先注册再开始采集，避免 StartGrabbing 后到注册完成前漏掉首个触发事件。
                 // SDK 无注销 API，回调随 CloseDevice 释放；标志防重复注册。
                 if (!_triggerEventRegistered)
                 {
@@ -522,6 +517,12 @@ public sealed class MvCameraControlCameraController : ICameraController
                     {
                         AppLog.Warn($"注册 {FrameStartEventName} 事件失败（错误码 {registerRet}），取图超时将回退为出帧间隔判定");
                     }
+                }
+
+                var ret = _camera.MV_CC_StartGrabbing_NET();
+                if (ret != 0)
+                {
+                    throw new InvalidOperationException($"开始硬触发采集失败（错误码 {ret}）");
                 }
 
                 _isHardTriggering = true;

@@ -1,10 +1,10 @@
 using OpenCvSharp;
 
-namespace SpeakerVisionInspection.Detection;
+namespace VisionInspection.Detection;
 
 /// <summary>
 /// 轮廓模板建模：灰度图 → 高斯平滑 → Sobel 梯度 → 幅值非极大值抑制 → 对比度阈值筛选
-/// → 归一化梯度方向 → 金字塔分层点集（每层按对比度取前 N，防止点数爆炸）。
+/// → 归一化梯度方向 → 金字塔分层点集（先按空间网格均匀取点，再按对比度补足，防止点数爆炸）。
 /// 层级：LevelPoints[0] = 原始分辨率，逐层 pyrDown（1/2^i）。
 /// </summary>
 public static class ShapeTemplateBuilder
@@ -104,12 +104,44 @@ public static class ShapeTemplateBuilder
             }
         }
 
-        candidates.Sort((a, b) => b.Mag.CompareTo(a.Mag));
+        candidates.Sort((a, b) =>
+        {
+            var contrastOrder = b.Mag.CompareTo(a.Mag);
+            if (contrastOrder != 0) return contrastOrder;
+            var yOrder = a.Y.CompareTo(b.Y);
+            return yOrder != 0 ? yOrder : a.X.CompareTo(b.X);
+        });
+
         var result = new List<TemplatePoint>(Math.Min(candidates.Count, maxPoints));
-        foreach (var c in candidates)
+        if (maxPoints <= 0 || candidates.Count == 0) return result;
+
+        // 先覆盖整个 ROI，避免高对比度局部边缘独占模板点预算。
+        var gridX = Math.Max(1, (int)Math.Ceiling(Math.Sqrt(maxPoints * (double)w / h)));
+        var gridY = Math.Max(1, (int)Math.Ceiling(maxPoints / (double)gridX));
+        var occupied = new HashSet<(int X, int Y)>();
+        var selected = new HashSet<int>();
+        // 网格覆盖只在强边缘候选池内进行，避免背景纹理等弱边缘挤占模板预算。
+        var poolCount = Math.Min(candidates.Count, Math.Max(maxPoints, maxPoints * 3));
+        for (var i = 0; i < poolCount; i++)
         {
             if (result.Count >= maxPoints) break;
+            var c = candidates[i];
+            var cell = (Math.Min(gridX - 1, (int)c.X * gridX / w), Math.Min(gridY - 1, (int)c.Y * gridY / h));
+            if (!occupied.Add(cell)) continue;
+            selected.Add(i);
             result.Add(new TemplatePoint(c.X - (float)refXLevel, c.Y - (float)refYLevel, c.Dx, c.Dy));
+        }
+
+        // 网格中没有边缘的区域跳过，再用全局强度补足剩余预算。
+        if (result.Count < maxPoints)
+        {
+            for (var i = 0; i < candidates.Count; i++)
+            {
+                if (result.Count >= maxPoints) break;
+                if (!selected.Add(i)) continue;
+                var c = candidates[i];
+                result.Add(new TemplatePoint(c.X - (float)refXLevel, c.Y - (float)refYLevel, c.Dx, c.Dy));
+            }
         }
         return result;
     }

@@ -1,4 +1,4 @@
-namespace SpeakerVisionInspection.Detection;
+namespace VisionInspection.Detection;
 
 /// <summary>
 /// 检测项（ROI）名 ↔ 模型类名匹配：检测项名字能对上哪个模型类，该项就只判哪个类；对不上则按全部非背景类别判定。

@@ -1,4 +1,4 @@
-namespace SpeakerVisionInspection.Camera;
+namespace VisionInspection.Camera;
 
 /// <summary>触发配置（触发模式 + 硬触发参数）。</summary>
 public sealed record TriggerSettings
@@ -20,9 +20,6 @@ public sealed record TriggerSettings
 
     /// <summary>条件触发数（AcquisitionBurstFrameCount）：单次触发连续出帧数。</summary>
     public int BurstFrameCount { get; set; } = 1;
-
-    /// <summary>最小触发间隔（ms）。</summary>
-    public double MinTriggerIntervalMs { get; set; } = 100;
 
     /// <summary>取图超时（ms）：已产出过帧后，出帧间隔超过该值即报"取图超时"（PLC 触发后相机未出帧）。</summary>
     public double GrabTimeoutMs { get; set; } = 500;

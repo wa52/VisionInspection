@@ -1,8 +1,8 @@
 using System.Runtime.InteropServices;
 using OpenCvSharp;
-using SpeakerVisionInspection.Camera;
+using VisionInspection.Camera;
 
-namespace SpeakerVisionInspection.Production;
+namespace VisionInspection.Production;
 
 /// <summary>
 /// 相机帧 → OpenCV BGR Mat。

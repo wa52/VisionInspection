@@ -1,4 +1,6 @@
-namespace SpeakerVisionInspection.Models;
+namespace VisionInspection.Models;
+
+using VisionInspection.Detection;
 
 public sealed record DetectionResult(
     string Image,
@@ -10,6 +12,9 @@ public sealed record DetectionResult(
 {
     /// <summary>每节点输出明细（节点名 → 值字典），UI 展示多模型 score 用。</summary>
     public Dictionary<string, Dictionary<string, string>> NodeDetails { get; init; } = new();
+
+    /// <summary>每节点矢量标注（模板匹配框、缺陷轮廓等），供硬触发结果回显。</summary>
+    public Dictionary<string, IReadOnlyList<NodeShape>> NodeAnnotations { get; init; } = new();
 
     public string ToPlain() => Decision;
 

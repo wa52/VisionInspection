@@ -1,4 +1,4 @@
-namespace SpeakerVisionInspection.Camera;
+namespace VisionInspection.Camera;
 
 /// <summary>触发模式。</summary>
 public enum CameraTriggerMode

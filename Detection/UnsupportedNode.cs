@@ -1,9 +1,9 @@
 using OpenCvSharp;
-using SpeakerVisionInspection.Models;
+using VisionInspection.Models;
 
-namespace SpeakerVisionInspection.Detection;
+namespace VisionInspection.Detection;
 
-/// <summary>占位节点：用于尚未实现的模型类型（YOLO/OCR 等扩展点）。可保存/添加，运行时报 ERROR 不崩溃。</summary>
+/// <summary>占位节点：用于尚未实现的模型类型（扩展点）。可保存/添加，运行时报 ERROR 不崩溃。</summary>
 public sealed class UnsupportedNode : IModelNode
 {
     private readonly string _message;

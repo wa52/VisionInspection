@@ -1,7 +1,7 @@
 using System.IO;
 using System.Windows.Media.Imaging;
 
-namespace SpeakerVisionInspection.Camera;
+namespace VisionInspection.Camera;
 
 /// <summary>图像保存：PNG 编码 + 时间戳文件名（独占创建，不覆盖已有文件）。</summary>
 public sealed class ImageSaver

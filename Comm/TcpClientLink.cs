@@ -1,7 +1,7 @@
 using System.Net.Sockets;
 using System.Text;
 
-namespace SpeakerVisionInspection.Comm;
+namespace VisionInspection.Comm;
 
 /// <summary>
 /// TCP 客户端链路：主动连接 目标IP:端口；掉线后按 AutoReconnect 每 3s 重试，Stop 终止。
@@ -12,7 +12,6 @@ public sealed class TcpClientLink : CommLinkBase
     private TcpClient? _client;
     private CancellationTokenSource? _cts;
     private CommDevice _device = new();
-    private LineAccumulator? _accumulator;
 
     public override bool IsReady
     {
@@ -29,7 +28,7 @@ public sealed class TcpClientLink : CommLinkBase
     {
         Stop();
         _device = device with { };
-        _accumulator = CreateAccumulator();
+        InitAccumulator();
         var cts = new CancellationTokenSource();
         lock (_sync)
         {
@@ -115,10 +114,7 @@ public sealed class TcpClientLink : CommLinkBase
                 return;
             }
 
-            foreach (var line in _accumulator!.Feed(Encoding.UTF8.GetString(buffer, 0, read)))
-            {
-                Emit(line);
-            }
+            ReceiveChunk(Encoding.UTF8.GetString(buffer, 0, read));
         }
     }
 
@@ -133,6 +129,7 @@ public sealed class TcpClientLink : CommLinkBase
             _cts = null;
         }
 
+        ResetReceiveState();
         client?.Close();
     }
 

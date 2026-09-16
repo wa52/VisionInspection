@@ -1,4 +1,4 @@
-namespace SpeakerVisionInspection.Trigger;
+namespace VisionInspection.Trigger;
 
 /// <summary>硬触发状态机状态。</summary>
 public enum TriggerState

@@ -9,3 +9,8 @@ appsettings.json
 # 临时草稿文件与 AI 会话导出，不随仓库
 .scratch
 opencode.md
+# 本机诊断与运行产物
+*.dmp
+*.db
+AwakenGPUToolLog.txt
+*.corrupt.bak

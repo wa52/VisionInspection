@@ -1,6 +1,6 @@
 using System.IO;
 
-namespace SpeakerVisionInspection.Detection;
+namespace VisionInspection.Detection;
 
 /// <summary>兼容旧的单模型运行时接口（测试用 Fake 实现）。</summary>
 public interface IPatchCoreRuntime : IDisposable

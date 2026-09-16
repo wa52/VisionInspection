@@ -1,17 +1,18 @@
 using System.IO;
 using OpenCvSharp;
-using SpeakerVisionInspection.Models;
-using SpeakerVisionInspection.Services;
+using VisionInspection.Models;
+using VisionInspection.Services;
 
-namespace SpeakerVisionInspection.Detection;
+namespace VisionInspection.Detection;
 
 /// <summary>
 /// 轮廓匹配节点（基于边缘方向的形状模板匹配，VisionMaster 轮廓匹配同类原理）。
 /// 模板目录契约：shape_template.json（建模弹窗生成：分层边缘点集 + 基准点 + 建模参数）。
 /// 输出基准点在搜索图中的 X/Y/Angle/Score（金字塔由粗到细，Score=方向匹配点占比）。
 /// 判定模式：匹配成功即OK（默认，缺失→NG）/ 匹配成功即NG（存在→NG）。
+/// 快速匹配节点（FastMatchNode）继承本节点，仅搜索内核换快速模式（点集抽稀+单轮精修）。
 /// </summary>
-public sealed class ContourMatchNode : IModelNode
+public class ContourMatchNode : IModelNode
 {
     public const string DecisionFoundOk = "匹配成功即OK";
     public const string DecisionFoundNg = "匹配成功即NG";
@@ -28,10 +29,11 @@ public sealed class ContourMatchNode : IModelNode
         new ParamDef { Key = "max_overlap", Label = "实例NMS重叠阈值", Kind = "double", Default = "0.3" },
         new ParamDef { Key = "polarity", Label = "方向极性", Kind = "choice", Default = "启用", Choices = ["启用", "忽略"] },
         new ParamDef { Key = "decision_mode", Label = "判定模式", Kind = "choice", Default = DecisionFoundOk, Choices = [DecisionFoundOk, DecisionFoundNg] },
+        new ParamDef { Key = "max_workers", Label = "并行线程数(0=自动)", Kind = "double", Default = "0" },
     ];
 
-    private ShapeTemplate? _template;
-    private readonly Dictionary<string, string> _params = new()
+    protected ShapeTemplate? _template;
+    protected readonly Dictionary<string, string> _params = new()
     {
         ["model_dir"] = "",
         ["source"] = "@input",
@@ -51,6 +53,7 @@ public sealed class ContourMatchNode : IModelNode
     public ContourMatchNode(string name, Dictionary<string, string>? init = null)
     {
         Name = name;
+        _params.TryAdd("max_workers", "0");
         if (init != null)
         {
             foreach (var (k, v) in init) _params[k] = v;
@@ -58,9 +61,9 @@ public sealed class ContourMatchNode : IModelNode
     }
 
     public string Name { get; set; }
-    public string Type => "ContourMatch";
+    public virtual string Type => "ContourMatch";
     public bool Enabled { get; set; } = true;
-    public IReadOnlyList<ParamDef> ParamDefs => StaticParamDefs;
+    public virtual IReadOnlyList<ParamDef> ParamDefs => StaticParamDefs;
     public IReadOnlyDictionary<string, string> Params => _params;
 
     /// <summary>运行时模板目录（已解析绝对路径）。</summary>
@@ -68,10 +71,9 @@ public sealed class ContourMatchNode : IModelNode
 
     public void SetParam(string key, string value)
     {
-        var oldModelDir = _params.GetValueOrDefault("model_dir");
         _params[key] = value;
-        // 只有模板目录变化才需要重载模板；分数/角度/实例数/极性/ROI 热生效
-        if (key == "model_dir" && value != oldModelDir)
+        // 模板文件可能在同一目录被覆盖，model_dir 热应用时也必须失效缓存。
+        if (key == "model_dir")
         {
             _template = null;
         }
@@ -97,12 +99,6 @@ public sealed class ContourMatchNode : IModelNode
 
     public NodeResult Run(Mat bgr, PipelineRunContext ctx)
     {
-        if (_template == null)
-        {
-            throw new InvalidOperationException(
-                $"节点 {Name}: 模板未加载（构建时加载失败，请检查「模板目录」: {ResolvedModelDir}）");
-        }
-
         // 图像来源：@input 或上游节点输出
         var source = _params.GetValueOrDefault("source") ?? "@input";
         var img = source == "@input" ? bgr : (ctx.Images.TryGetValue(source, out var im) ? im : null);
@@ -113,6 +109,25 @@ public sealed class ContourMatchNode : IModelNode
         if (img.Empty())
         {
             throw new InvalidOperationException($"节点 {Name}: 输入图像为空（单次/连续执行请把「图像来源」指向图像源节点）");
+        }
+
+        if (_template == null)
+        {
+            // 模板未加载：自判 ERROR 停线，但透传源图——显示区有图才能画搜索 ROI/对照建模
+            // （提前抛异常会导致永远无图可画，与直线查找同款死循环防御）
+            var dirText = string.IsNullOrWhiteSpace(ResolvedModelDir) ? _params.GetValueOrDefault("model_dir") : ResolvedModelDir;
+            var message = $"节点 {Name}: 模板未加载（请先在参数面板「创建模板（轮廓建模）」建模，或检查「模板目录」: {dirText}）";
+            Log?.Invoke("[轮廓匹配] " + message);
+            var errorResult = new NodeResult
+            {
+                Decision = "ERROR",
+                Error = message,
+                OutputImage = BuildBaseImage(img),
+            };
+            errorResult.Values["error"] = message;
+            errorResult.Values["loc_valid"] = "0";
+            errorResult.Values["matches"] = "0";
+            return errorResult;
         }
 
         // 搜索区域：只支持本节点绘制的私有 ROI（轮廓匹配不引用方案 ROI 库）；空 = 全图
@@ -128,21 +143,25 @@ public sealed class ContourMatchNode : IModelNode
         var sigma = _template!.Sigma;
         var usePolarity = !string.Equals(_params.GetValueOrDefault("polarity"), "忽略", StringComparison.Ordinal);
 
-        using var gray = ToGray(img);
         var matches = new List<ShapeMatchInstance>();
         if (rois.Count == 0)
         {
+            using var gray = ToGray(img);
             matches.AddRange(FindInRegion(gray, minScore, angleStart, angleExtent, numMatches, minContrast, maxOverlap, sigma, usePolarity));
         }
         else
         {
+            // 先裁剪后转灰度（逐像素独立，结果与先整图转灰度严格一致）：大图 + 小 ROI 时省掉全图灰度转换
             foreach (var (name, rect) in rois)
             {
                 var (cx, cy, w, h, angle) = rect.ToPixels(img.Width, img.Height);
                 var region = YoloNode.ComputeRoiCropRect((int)cx, (int)cy, w, h, angle, img.Width, img.Height);
-                using var cropView = new Mat(gray, region);
+                using var cropBgr = new Mat(img, region);
+                using var cropView = ToGray(cropBgr);
                 var found = FindInRegion(cropView, minScore, angleStart, angleExtent, numMatches, minContrast, maxOverlap, sigma, usePolarity);
-                matches.AddRange(found.Select(m => new ShapeMatchInstance(m.X + region.X, m.Y + region.Y, m.Angle, m.Score)));
+                matches.AddRange(found
+                    .Select(m => new ShapeMatchInstance(m.X + region.X, m.Y + region.Y, m.Angle, m.Score))
+                    .Where(m => IsMatchInsideRoi(m, rect, img.Width, img.Height)));
             }
         }
 
@@ -184,6 +203,20 @@ public sealed class ContourMatchNode : IModelNode
         return nodeResult;
     }
 
+    private bool IsMatchInsideRoi(ShapeMatchInstance match, RoiRect roi, int imgW, int imgH)
+    {
+        if (_template is null || _template.LevelPoints.Count == 0) return false;
+        var rad = match.Angle * Math.PI / 180.0;
+        var cos = Math.Cos(rad);
+        var sin = Math.Sin(rad);
+        return _template.LevelPoints[0].All(p =>
+        {
+            var x = match.X + p.X * cos - p.Y * sin;
+            var y = match.Y + p.X * sin + p.Y * cos;
+            return NodeRois.ContainsPixel(roi, x, y, imgW, imgH);
+        });
+    }
+
     /// <summary>判定（纯逻辑，可单测）：匹配成功即OK（默认）/ 匹配成功即NG。</summary>
     internal static string ComputeDecision(string? mode, bool found)
     {
@@ -194,11 +227,14 @@ public sealed class ContourMatchNode : IModelNode
         return found ? "OK" : "NG";
     }
 
-    private List<ShapeMatchInstance> FindInRegion(
+    protected virtual List<ShapeMatchInstance> FindInRegion(
         Mat gray, double minScore, double angleStart, double angleExtent, int numMatches,
         double minContrast, double maxOverlap, double sigma, bool usePolarity)
     {
-        var matcher = new ShapeMatcher(_template!, minScore, angleStart, angleExtent, numMatches, maxOverlap, minContrast, sigma, usePolarity);
+        // ≤0 或非法值 = 自动（ShapeMatcher 内部取 ProcessorCount/2）；分块按索引序合并，与串行逐位一致
+        var maxWorkers = (int)Math.Round(ParseDouble(_params.GetValueOrDefault("max_workers"), 0));
+        var matcher = new ShapeMatcher(_template!, minScore, angleStart, angleExtent, numMatches, maxOverlap,
+            minContrast, sigma, usePolarity, fastMode: false, maxWorkers: maxWorkers);
         return matcher.Find(gray);
     }
 
@@ -310,7 +346,7 @@ public sealed class ContourMatchNode : IModelNode
         return shapes;
     }
 
-    private static double ParseDouble(string? raw, double fallback) =>
+    protected static double ParseDouble(string? raw, double fallback) =>
         double.TryParse(raw, out var v) ? v : fallback;
 
     public void Dispose()

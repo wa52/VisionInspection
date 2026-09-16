@@ -1,6 +1,6 @@
 using System.Collections.Concurrent;
 
-namespace SpeakerVisionInspection.Plc;
+namespace VisionInspection.Plc;
 
 /// <summary>
 /// 日志/模拟 PLC 回传：记录每条消息供测试与联调，实际不连接任何 PLC。

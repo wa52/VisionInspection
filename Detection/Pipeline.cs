@@ -1,9 +1,10 @@
 using System.IO;
 using OpenCvSharp;
-using SpeakerVisionInspection.Camera;
-using SpeakerVisionInspection.Models;
+using VisionInspection.Camera;
+using VisionInspection.Comm;
+using VisionInspection.Models;
 
-namespace SpeakerVisionInspection.Detection;
+namespace VisionInspection.Detection;
 
 /// <summary>单图检测结果（整条流水线）：最终判定 + 每节点明细。</summary>
 public sealed class PipelineResult
@@ -77,6 +78,14 @@ public sealed class Pipeline : IDisposable
                 case ContourMatchNode cm: cm.Log = _log; break;
                 case PositionCorrectionNode pc: pc.Log = _log; break;
                 case KeyControlNode kc: kc.Log = _log; break;
+                case CharRecNode crc: crc.Log = _log; break;
+                case BlobNode bn: bn.Log = _log; break;
+                case SendDataNode sd: sd.Log = _log; break;
+                case ReceiveDataNode rd: rd.Log = _log; break;
+                case LineFindNode lf: lf.Log = _log; break;
+                case CircleFindNode cf: cf.Log = _log; break;
+                case MeasureNodeBase mn: mn.Log = _log; break; // 几何测量四节点共用基类
+                case OverlayDisplayNode od: od.Log = _log; break;
             }
             _nodes.Add(node);
         }
@@ -157,11 +166,15 @@ public sealed class Pipeline : IDisposable
                     cm.EnsureLoaded(_recipe.BaseDir);
                     _log?.Invoke($"[校验] {node.Name}: 模板已加载: {cm.ResolvedModelDir}");
                     break;
+                case CharRecNode crc:
+                    crc.EnsureLoaded(_recipe.BaseDir);
+                    _log?.Invoke($"[校验] {node.Name}: 字模库已加载: {crc.ResolvedModelDir}（{crc.TemplateCount} 个样本）");
+                    break;
             }
         }
         catch (Exception ex)
         {
-            var hint = node is YoloNode or SegNode or SemanticSegNode or ContourMatchNode ? "「模型目录」" : "「模型路径」";
+            var hint = node is YoloNode or SegNode or SemanticSegNode or ContourMatchNode or CharRecNode ? "「模型目录」" : "「模型路径」";
             _log?.Invoke($"[校验] {node.Name}: 模型加载失败: {ex.Message}（请检查{hint}参数）");
         }
     }
@@ -174,7 +187,8 @@ public sealed class Pipeline : IDisposable
         string imageName,
         string? vmSource = null,
         Action<IoCommunicationSettings>? cameraIoOutput = null,
-        IReadOnlyDictionary<string, Mat>? sourceOverrides = null)
+        IReadOnlyDictionary<string, Mat>? sourceOverrides = null,
+        ICommRuntime? commRuntime = null)
     {
         var result = new PipelineResult
         {
@@ -182,7 +196,7 @@ public sealed class Pipeline : IDisposable
             ProcessedAt = DateTime.Now.ToString("yyyy-MM-ddTHH:mm:ss.fff"),
         };
         _nodeFailed = false;
-        var ctx = new PipelineRunContext(bgr, cameraIoOutput);
+        var ctx = new PipelineRunContext(bgr, cameraIoOutput, commRuntime);
         if (sourceOverrides is not null)
         {
             foreach (var (name, mat) in sourceOverrides)
@@ -292,7 +306,8 @@ public sealed class Pipeline : IDisposable
         IReadOnlyDictionary<string, Mat> nodeInputs,
         string imageName,
         IReadOnlySet<string>? requiredModelNodes = null,
-        Action<IoCommunicationSettings>? cameraIoOutput = null)
+        Action<IoCommunicationSettings>? cameraIoOutput = null,
+        ICommRuntime? commRuntime = null)
     {
         var result = new PipelineResult
         {
@@ -300,7 +315,7 @@ public sealed class Pipeline : IDisposable
             ProcessedAt = DateTime.Now.ToString("yyyy-MM-ddTHH:mm:ss.fff"),
         };
         _nodeFailed = false;
-        var ctx = new PipelineRunContext(nodeInputs.Values.FirstOrDefault() ?? new Mat(), cameraIoOutput);
+        var ctx = new PipelineRunContext(nodeInputs.Values.FirstOrDefault() ?? new Mat(), cameraIoOutput, commRuntime);
         var skippedNodes = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
 
         // 阶段1：所有启用的模型节点并发执行（节点间无依赖，各自独立 runtime，线程安全）。
@@ -447,16 +462,18 @@ public sealed class Pipeline : IDisposable
     {
         string? lastName = null;
         string? lastModelName = null;
+        string? lastOverlayName = null;
         foreach (var node in _nodes)
         {
             if (!images.TryGetValue(node.Name, out var img) || img.Empty()) continue;
             result.NodeImages[node.Name] = img;
             images.Remove(node.Name);
             lastName = node.Name;
+            if (node is OverlayDisplayNode) lastOverlayName = node.Name;
             if (IsModelNode(node)) lastModelName = node.Name;
         }
 
-        var displayName = lastModelName ?? lastName;
+        var displayName = lastOverlayName ?? lastModelName ?? lastName;
         if (displayName != null)
         {
             result.DisplayImage = result.NodeImages[displayName];
@@ -486,7 +503,9 @@ public sealed class Pipeline : IDisposable
 
     private static bool IsModelNode(IModelNode node) =>
         node is not DecisionNode and not SaveImageNode and not DisplayNode and not CameraIoNode
-        and not ImageSourceNode and not BinarizeNode and not GeometryNode and not KeyControlNode;
+        and not ImageSourceNode and not BinarizeNode and not GeometryNode and not KeyControlNode
+        and not SendDataNode and not ReceiveDataNode and not LineFindNode and not CircleFindNode
+        and not MeasureNodeBase and not OverlayDisplayNode;
 
     /// <summary>
     /// 构建期校验节点引用（只记日志，不阻断）：source/条件引用的节点不存在、

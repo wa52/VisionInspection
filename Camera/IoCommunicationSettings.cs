@@ -1,4 +1,4 @@
-namespace SpeakerVisionInspection.Camera;
+namespace VisionInspection.Camera;
 
 /// <summary>IO 通信配置：PLC 触发输入与 Strobe 光耦结果输出。</summary>
 public sealed class IoCommunicationSettings

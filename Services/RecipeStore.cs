@@ -1,8 +1,8 @@
 using System.IO;
 using System.Text.Json;
-using SpeakerVisionInspection.Models;
+using VisionInspection.Models;
 
-namespace SpeakerVisionInspection.Services;
+namespace VisionInspection.Services;
 
 /// <summary>
 /// 方案（Recipe）持久化：New/Open/Save/SaveAs + 自动加载上次方案。

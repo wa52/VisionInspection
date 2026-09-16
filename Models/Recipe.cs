@@ -1,8 +1,8 @@
 using System.Text.Json;
 using System.Text.Json.Serialization;
-using SpeakerVisionInspection.Detection;
+using VisionInspection.Detection;
 
-namespace SpeakerVisionInspection.Models;
+namespace VisionInspection.Models;
 
 /// <summary>模型节点参数定义（驱动通用 Inspector 与序列化）。</summary>
 public sealed class ParamDef
@@ -13,13 +13,15 @@ public sealed class ParamDef
     public string Kind { get; set; } = "string";
     public string? Default { get; set; }
     public string[]? Choices { get; set; }
+    /// <summary>Kind=noderesult（上游节点输出引用下拉）时的节点类型过滤，如 ["LineFind"]；空 = 不过滤。</summary>
+    public string[]? SourceTypes { get; set; }
 }
 
 /// <summary>模型节点：统一接口（M2 起由各实现类提供 Run 行为）。</summary>
 public sealed class RecipeNode
 {
     public string Name { get; set; } = "模型";
-    /// <summary>PatchCore | Decision | SaveImage | YOLO | OCR | ...（NodeFactory 注册的类型名）</summary>
+    /// <summary>PatchCore | Decision | SaveImage | YOLO | CharRec | ...（NodeFactory 注册的类型名）</summary>
     public string Type { get; set; } = "PatchCore";
     public bool Enabled { get; set; } = true;
     public Dictionary<string, string> Params { get; set; } = new();
@@ -126,84 +128,6 @@ public sealed class Recipe
 
     public static Recipe CreateDefault()
     {
-        return new Recipe
-        {
-            Name = "泡棉检测",
-            Nodes =
-            [
-                new RecipeNode
-                {
-                    Name = "01 图像源",
-                    Type = "ImageSource",
-                    Enabled = true,
-                    Params = new Dictionary<string, string>
-                    {
-                        ["source_kind"] = "图像文件",
-                        ["dir"] = "",
-                        ["path"] = "",
-                        ["loop"] = "true",
-                    },
-                },
-                new RecipeNode
-                {
-                    Name = "02 PatchCore_表面",
-                    Type = "PatchCore",
-                    Enabled = true,
-                    Params = new Dictionary<string, string>
-                    {
-                        // 默认从 bin\Debug\net8.0-windows 向上 4 级到仓库根（与 PatchCoreNode 默认一致）
-                        ["model_dir"] = @"..\..\..\..\patchcore train\models\foam_patchcore",
-                        ["source"] = "01 图像源",
-                        ["threshold"] = "",
-                    },
-                },
-                new RecipeNode
-                {
-                    Name = "03 条件检测",
-                    Type = "Decision",
-                    Enabled = true,
-                    Rules =
-                    [
-                        new DecisionRule
-                        {
-                            MatchMode = "all",
-                            Conditions =
-                            [
-                                // 条件检测只判断上游检测节点的测试结果；阈值等细节属于检测模块内部。
-                                new Condition { Node = "02 PatchCore_表面", Field = "decision", Op = "=", Value = "OK" },
-                            ],
-                            Result = "OK",
-                            ElseResult = "NG",
-                        },
-                    ],
-                },
-                new RecipeNode
-                {
-                    Name = "04 相机IO通信",
-                    Type = "CameraIo",
-                    Enabled = true,
-                    Params = new Dictionary<string, string>
-                    {
-                        ["source"] = "03 条件检测",
-                        ["output_when"] = "NG",
-                        ["duration_ms"] = "500",
-                    },
-                },
-            ],
-            Decision = new RecipeDecision
-            {
-                Rules =
-                [
-                    new DecisionRule
-                    {
-                        Conditions =
-                        [
-                            new Condition { Node = "01 PatchCore_表面", Field = "score", Op = ">", Value = "@threshold" },
-                        ],
-                        Result = "NG",
-                    },
-                ],
-            },
-        };
+        return new Recipe { Name = "新建方案" };
     }
 }

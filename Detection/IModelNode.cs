@@ -1,8 +1,9 @@
 using OpenCvSharp;
-using SpeakerVisionInspection.Camera;
-using SpeakerVisionInspection.Models;
+using VisionInspection.Camera;
+using VisionInspection.Comm;
+using VisionInspection.Models;
 
-namespace SpeakerVisionInspection.Detection;
+namespace VisionInspection.Detection;
 
 /// <summary>节点标注形状类别：UI 矢量叠加层按类别着色（Defect=红、Ok=绿、Info=黄）。</summary>
 public enum NodeShapeKind
@@ -72,6 +73,12 @@ public sealed class PipelineRunContext
     public Action<IoCommunicationSettings>? CameraIoOutput { get; }
 
     /// <summary>
+    /// 通信运行时（发送数据/接收数据节点收发文本用；未装配时为 null → 节点 ERROR 停线）。
+    /// 由主窗口/生产服务注入，与 CameraIoOutput 同款委托注入模式。
+    /// </summary>
+    public ICommRuntime? CommRuntime { get; }
+
+    /// <summary>
     /// 位置修正（由 PositionCorrectionNode 写入）：下游节点解析完自己的 ROI 后应用此变换，
     /// 使检测区域跟随工件平移+旋转。定位来源节点须输出 loc_x/loc_y/loc_angle/loc_valid 标准契约键。
     /// </summary>
@@ -79,10 +86,12 @@ public sealed class PipelineRunContext
 
     public PipelineRunContext(
         Mat input,
-        Action<IoCommunicationSettings>? cameraIoOutput = null)
+        Action<IoCommunicationSettings>? cameraIoOutput = null,
+        ICommRuntime? commRuntime = null)
     {
         Input = input;
         CameraIoOutput = cameraIoOutput;
+        CommRuntime = commRuntime;
     }
 
     public bool EmitCameraIo(IoCommunicationSettings settings)

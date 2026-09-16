@@ -1,7 +1,7 @@
 using System.Globalization;
-using SpeakerVisionInspection.Models;
+using VisionInspection.Models;
 
-namespace SpeakerVisionInspection.Detection;
+namespace VisionInspection.Detection;
 
 /// <summary>
 /// 判断模块求值：兼容旧多规则 OR，同时支持单规则内 all/any 条件组合。

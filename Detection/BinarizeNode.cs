@@ -1,7 +1,7 @@
 using OpenCvSharp;
-using SpeakerVisionInspection.Models;
+using VisionInspection.Models;
 
-namespace SpeakerVisionInspection.Detection;
+namespace VisionInspection.Detection;
 
 /// <summary>
 /// 图像二值化节点：取原图或上游输出图，转灰度后做可调阈值二值化。

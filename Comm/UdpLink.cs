@@ -2,7 +2,7 @@ using System.Net;
 using System.Net.Sockets;
 using System.Text;
 
-namespace SpeakerVisionInspection.Comm;
+namespace VisionInspection.Comm;
 
 /// <summary>
 /// UDP 链路：绑定本地端口收包；发送到 目标IP:端口（目标IP 为空时回发最近来包的对端）。
@@ -14,7 +14,6 @@ public sealed class UdpLink : CommLinkBase
     private IPEndPoint? _remote;
     private CancellationTokenSource? _cts;
     private CommDevice _device = new();
-    private LineAccumulator? _accumulator;
 
     public override bool IsReady
     {
@@ -31,7 +30,7 @@ public sealed class UdpLink : CommLinkBase
     {
         Stop();
         _device = device with { };
-        _accumulator = CreateAccumulator();
+        InitAccumulator();
         var udp = new UdpClient(Math.Max(1, device.Port));
         _remote = string.IsNullOrWhiteSpace(_device.Host)
             ? null
@@ -59,10 +58,7 @@ public sealed class UdpLink : CommLinkBase
                     _remote ??= result.RemoteEndPoint;
                 }
 
-                foreach (var line in _accumulator!.Feed(Encoding.UTF8.GetString(result.Buffer)))
-                {
-                    Emit(line);
-                }
+                ReceiveChunk(Encoding.UTF8.GetString(result.Buffer));
             }
             catch (OperationCanceledException)
             {
@@ -91,6 +87,7 @@ public sealed class UdpLink : CommLinkBase
             _cts = null;
         }
 
+        ResetReceiveState();
         udp?.Dispose();
     }
 

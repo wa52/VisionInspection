@@ -2,7 +2,7 @@
   "schema_version": 1,
   "diagram_type": "architecture",
   "meta": {
-    "title": "SpeakerVisionInspection 运行时架构",
+    "title": "VisionInspection 运行时架构",
     "locale": "zh-CN",
     "output": "docs/architecture-runtime.html",
     "quality_profile": "showcase",
@@ -18,12 +18,12 @@
     { "id": "model_nodes", "type": "backend", "label": "检测模型节点", "sublabel": "PatchCore · YOLO · Seg · SemanticSeg", "pos": [1060, 180], "size": [250, 68] },
     { "id": "model_files", "type": "database", "label": "模型 / 模板目录 (model_dir)", "sublabel": "ONNX 模型 · 记忆库 · classes.txt", "pos": [1060, 310], "size": [250, 68] },
     { "id": "camera_ctrl", "type": "backend", "label": "ICameraController", "sublabel": "海康 MVS SDK 封装", "pos": [200, 340], "size": [190, 68] },
-    { "id": "inspection_service", "type": "backend", "label": "CameraInspectionService", "sublabel": "生产闭环 · 状态机 · IPlcClient", "pos": [520, 340], "size": [230, 68] },
+    { "id": "inspection_service", "type": "backend", "label": "CameraInspectionService", "sublabel": "生产闭环 · 状态机 · IO 电平回传（硬触发自动生效）", "pos": [520, 340], "size": [230, 68] },
     { "id": "hik_camera", "type": "external", "label": "海康工业相机", "sublabel": "硬触发 Line0 · IO 输出", "pos": [205, 445], "size": [180, 64] },
     { "id": "plc", "type": "external", "label": "产线 PLC", "sublabel": "Ready / Busy / OK / NG", "pos": [1090, 445], "size": [170, 64] }
   ],
   "boundaries": [
-    { "kind": "region", "label": "SpeakerVisionInspection 应用 (WPF · net8.0 · x64)", "wraps": ["recipe_store", "main_window", "comm_links", "image_source", "contour_match", "tool_nodes", "model_nodes", "model_files", "camera_ctrl", "inspection_service"], "pad": 24 },
+    { "kind": "region", "label": "VisionInspection 应用 (WPF · net8.0 · x64)", "wraps": ["recipe_store", "main_window", "comm_links", "image_source", "contour_match", "tool_nodes", "model_nodes", "model_files", "camera_ctrl", "inspection_service"], "pad": 24 },
     { "kind": "region", "label": "Detection 节点流水线 (Pipeline)", "wraps": ["image_source", "contour_match", "tool_nodes", "model_nodes"], "pad": 16 }
   ],
   "connections": [
@@ -38,12 +38,12 @@
     { "from": "main_window", "to": "image_source", "label": "单次/连续执行", "variant": "emphasis", "fromSide": "bottom", "toSide": "top", "via": [[460, 145], [325, 145]] },
     { "from": "main_window", "to": "recipe_store", "label": "方案读写" },
     { "from": "main_window", "to": "comm_links", "label": "通信管理弹窗", "variant": "dashed" },
-    { "from": "inspection_service", "to": "plc", "label": "Ready→Busy→OK/NG", "variant": "emphasis", "fromSide": "bottom", "toSide": "top", "via": [[635, 426], [1175, 426]] },
+    { "from": "inspection_service", "to": "plc", "label": "结果电平回传（IO 脉冲）", "variant": "emphasis", "fromSide": "bottom", "toSide": "top", "via": [[635, 426], [1175, 426]] },
     { "from": "model_nodes", "to": "model_files", "label": "加载 ONNX/类别", "labelAt": [1185, 279] }
   ],
   "cards": [
     { "dot": "cyan", "title": "启动与配置", "items": ["EnvironmentCheckService 启动自检 x64 进程与 MVS 托管/原生 DLL，缺失给中文可操作提示", "RecipeStore 启动加载 exe 同目录 recipe.json 并自动保存，旧 config.json 自动迁移", "主窗口与相机管理弹窗复用同一 ICameraController 句柄，生产运行中拒绝设备级操作"] },
-    { "dot": "emerald", "title": "生产闭环（硬触发）", "items": ["硬触发帧在相机事件线程内同步拷贝后立即释放，不异步持有 Mat", "有界队列容量 1，DropWrite 溢出计入 TriggerStateMachine.OverrunCount（Armed/Busy/Error）", "OK/NG → IPlcClient 状态语义 Ready→Busy→OK/NG（Error 可 Reset），NG 时由相机IO通信节点下发 Strobe 脉冲"] },
+    { "dot": "emerald", "title": "生产闭环（硬触发）", "items": ["硬触发帧在相机事件线程内同步拷贝后立即释放，不异步持有 Mat", "有界队列容量 1，DropWrite 溢出计入 TriggerStateMachine.OverrunCount（Armed/Busy/Error）", "结果经相机 IO 电平回传：相机IO通信节点按输出类型/输出线/有效电平发脉冲（如 NG→IO2、OK→IO1 高电平）；READY/BUSY 状态流转仅记日志（LoggingPlcClient）"] },
     { "dot": "violet", "title": "Detection 节点流水线", "items": ["NodeFactory 注册节点，未注册类型运行时记 ERROR 不崩溃", "检测项 (ROI) 级阈值/启停/判断/存图，总范围 scope_index 过滤结果", "位置修正读取 loc_x/loc_y/loc_angle 标准契约，目标节点 ROI 跟随工件平移+旋转"] },
     { "dot": "amber", "title": "外部依赖", "items": ["海康 MVS SDK：MvCameraControl.Net.dll（x64）+ 相机原生运行时，appsettings.json 可覆盖路径", "推理栈：ONNX Runtime + OpenCvSharp（本仓库自带，不依赖 VisionMaster 服务）", "模型目录契约：PatchCore = model.onnx + memory_bank.bin；YOLO/Seg/SemanticSeg = best.onnx + classes.txt；轮廓匹配 = shape_template.json"] }
   ]

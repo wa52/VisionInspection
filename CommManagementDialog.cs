@@ -1,10 +1,12 @@
 using System.Globalization;
 using System.Windows;
 using System.Windows.Controls;
+using System.Windows.Controls.Primitives;
+using System.Windows.Data;
 using System.Windows.Media;
-using SpeakerVisionInspection.Comm;
+using VisionInspection.Comm;
 
-namespace SpeakerVisionInspection;
+namespace VisionInspection;
 
 /// <summary>
 /// 通信管理窗口（设备级，VM 通信管理式）：通信设备列表 + 通信参数（协议/目标/端口/串口参数/自动重连/接收结束符）
@@ -17,6 +19,8 @@ public sealed class CommManagementDialog : Window
 
     private readonly CommDeviceStore? _store;
     private readonly Action<string> _log;
+    /// <summary>生产通信运行时（发送数据/接收数据节点持有链路时，本弹窗拒绝再连同一设备）。</summary>
+    private readonly ICommRuntime? _commRuntime;
     private readonly ListBox _deviceList = new();
     private readonly TextBlock _status = new();
     private readonly TextBox _name = new();
@@ -32,15 +36,94 @@ public sealed class CommManagementDialog : Window
     private readonly TextBox _terminator = new();
     private readonly TextBox _sendText = new() { Text = "Hello" };
     private readonly ListBox _receiveLog = new();
+    private readonly TextBlock _protocolHint = new();
+    private readonly TextBlock _paramDeviceHeader = new();
     private readonly Dictionary<Control, UIElement> _fields = new();
     private List<CommDevice> _devices = [];
-    private ICommLink? _link;
+    private List<DeviceItem> _items = [];
+    private readonly List<(CommDevice Device, ICommLink Link)> _connected = [];
 
-    public CommManagementDialog(Window owner, CommDeviceStore? store, Action<string> log)
+    /// <summary>设备行条目：设备 + 连接开关状态（驱动开关勾选与「连接/断开」文案）。</summary>
+    private sealed class DeviceItem : System.ComponentModel.INotifyPropertyChanged
+    {
+        public DeviceItem(CommDevice device) => Device = device;
+
+        public CommDevice Device { get; }
+
+        private bool _isConnected;
+        public bool IsConnected
+        {
+            get => _isConnected;
+            set
+            {
+                _isConnected = value;
+                PropertyChanged?.Invoke(this, new System.ComponentModel.PropertyChangedEventArgs(nameof(IsConnected)));
+                PropertyChanged?.Invoke(this, new System.ComponentModel.PropertyChangedEventArgs(nameof(SwitchText)));
+            }
+        }
+
+        public string SwitchText => IsConnected ? "断开" : "连接";
+
+        public event System.ComponentModel.PropertyChangedEventHandler? PropertyChanged;
+    }
+
+    /// <summary>每设备独立链路（VM 式：多个设备可同时连接，切选中项不断开）。</summary>
+    private ICommLink? LinkOf(CommDevice device) =>
+        _connected.FirstOrDefault(c => ReferenceEquals(c.Device, device)).Link;
+
+    private void DisconnectDevice(CommDevice device)
+    {
+        var index = _connected.FindIndex(c => ReferenceEquals(c.Device, device));
+        if (index < 0)
+        {
+            return;
+        }
+
+        var link = _connected[index].Link;
+        _connected.RemoveAt(index);
+        link.Dispose();
+        MarkConnected(device, false);
+    }
+
+    /// <summary>同步设备行开关显示（绑定翻转触发的 Checked/Unchecked 事件由守卫拦截，不会重复连断）。</summary>
+    private void MarkConnected(CommDevice device, bool connected)
+    {
+        var item = _items.FirstOrDefault(i => ReferenceEquals(i.Device, device));
+        if (item is not null)
+        {
+            item.IsConnected = connected;
+        }
+    }
+
+    private void DisposeAllLinks()
+    {
+        foreach (var entry in _connected)
+        {
+            try { entry.Link.Dispose(); } catch { /* 退出清理，忽略单个链路释放异常 */ }
+        }
+
+        _connected.Clear();
+    }
+
+    /// <summary>后台线程回显连接状态到状态栏（WPF 跨线程禁止直接改控件，统一调度）。</summary>
+    private void SetStatus(string text)
+    {
+        if (Dispatcher.CheckAccess())
+        {
+            _status.Text = text;
+        }
+        else
+        {
+            Dispatcher.BeginInvoke(() => _status.Text = text);
+        }
+    }
+
+    public CommManagementDialog(Window owner, CommDeviceStore? store, Action<string> log, ICommRuntime? commRuntime = null)
     {
         Owner = owner;
         _store = store;
         _log = log;
+        _commRuntime = commRuntime;
         Title = "通信管理";
         Width = 980;
         Height = 640;
@@ -50,14 +133,30 @@ public sealed class CommManagementDialog : Window
         Background = (Brush)(Application.Current.TryFindResource("BgBrush") ?? Brushes.Black);
         Foreground = (Brush)(Application.Current.TryFindResource("TextBrush") ?? Brushes.White);
         Content = BuildContent();
-        ApplyDarkListStyle(_deviceList);
+        ApplyDarkListStyle(_deviceList, accentSelection: true);
         ApplyDarkListStyle(_receiveLog);
+        BuildDeviceListTemplate();
         _devices = store?.Load() ?? [];
         RefreshDeviceList(_devices.Count > 0 ? _devices[0] : null);
+
+        // 设备名称随输入实时写回选中设备（CommDevice.Name 发 PropertyChanged → 列表即时改名）
+        _name.TextChanged += (_, _) =>
+        {
+            if (SelectedDevice is not { } device || string.IsNullOrWhiteSpace(_name.Text))
+            {
+                return;
+            }
+
+            if (!string.Equals(device.Name, _name.Text, StringComparison.Ordinal))
+            {
+                device.Name = _name.Text;
+                UpdateParamDeviceHeader();
+            }
+        };
     }
 
     /// <summary>ListBox 默认白底白字在深色主题下不可读；统一面板底色 + SelBrush 选中高亮。</summary>
-    private static void ApplyDarkListStyle(ListBox list)
+    private static void ApplyDarkListStyle(ListBox list, bool accentSelection = false)
     {
         list.Background = (Brush)(Application.Current.TryFindResource("PanelBrush") ?? Brushes.Transparent);
         list.Foreground = (Brush)(Application.Current.TryFindResource("TextBrush") ?? Brushes.White);
@@ -66,10 +165,94 @@ public sealed class CommManagementDialog : Window
         itemStyle.Setters.Add(new Setter(BackgroundProperty, Brushes.Transparent));
         itemStyle.Setters.Add(new Setter(ForegroundProperty, list.Foreground));
         itemStyle.Setters.Add(new Setter(PaddingProperty, new Thickness(4, 2, 4, 2)));
+        itemStyle.Setters.Add(new Setter(BorderThicknessProperty, new Thickness(1)));
+        itemStyle.Setters.Add(new Setter(BorderBrushProperty, Brushes.Transparent));
         var selected = new System.Windows.Trigger { Property = ListBoxItem.IsSelectedProperty, Value = true };
         selected.Setters.Add(new Setter(BackgroundProperty, (Brush)(Application.Current.TryFindResource("SelBrush") ?? Brushes.Navy)));
+        if (accentSelection)
+        {
+            // 设备列表：选中行加深蓝底 + 亮蓝描边，与未选中行明显区分（参数面板跟随此行设备）
+            selected.Setters.Add(new Setter(BorderBrushProperty, (Brush)(Application.Current.TryFindResource("AccentBrush") ?? Brushes.DodgerBlue)));
+        }
+
         itemStyle.Triggers.Add(selected);
         list.ItemContainerStyle = itemStyle;
+    }
+
+    /// <summary>设备行模板：连接开关（VM 式每设备开关，拨动即连/断该设备）+ 名称（协议类型）。</summary>
+    private void BuildDeviceListTemplate()
+    {
+        var template = new DataTemplate();
+        var panel = new FrameworkElementFactory(typeof(StackPanel));
+        panel.SetValue(StackPanel.OrientationProperty, Orientation.Horizontal);
+
+        var toggle = new FrameworkElementFactory(typeof(ToggleButton));
+        toggle.SetValue(FrameworkElement.MarginProperty, new Thickness(0, 0, 7, 0));
+        toggle.SetValue(FrameworkElement.MinWidthProperty, 56.0);
+        toggle.SetValue(FrameworkElement.HeightProperty, 22.0);
+        toggle.SetValue(FrameworkElement.VerticalAlignmentProperty, VerticalAlignment.Center);
+        toggle.SetBinding(ToggleButton.IsCheckedProperty, new Binding(nameof(DeviceItem.IsConnected)));
+        toggle.SetBinding(ButtonBase.ContentProperty, new Binding(nameof(DeviceItem.SwitchText)));
+        toggle.AddHandler(ToggleButton.CheckedEvent, new RoutedEventHandler(DeviceSwitch_Checked));
+        toggle.AddHandler(ToggleButton.UncheckedEvent, new RoutedEventHandler(DeviceSwitch_Unchecked));
+
+        var text = new FrameworkElementFactory(typeof(TextBlock));
+        text.SetBinding(TextBlock.TextProperty, new Binding(nameof(CommDevice.Display)));
+        text.SetValue(FrameworkElement.VerticalAlignmentProperty, VerticalAlignment.Center);
+        text.SetValue(TextBlock.TextTrimmingProperty, TextTrimming.CharacterEllipsis);
+        var textStyle = new Style(typeof(TextBlock));
+        var boldWhenSelected = new DataTrigger
+        {
+            Binding = new Binding(nameof(ListBoxItem.IsSelected))
+            {
+                RelativeSource = new RelativeSource
+                {
+                    Mode = RelativeSourceMode.FindAncestor,
+                    AncestorType = typeof(ListBoxItem),
+                    AncestorLevel = 1,
+                },
+            },
+            Value = true,
+        };
+        boldWhenSelected.Setters.Add(new Setter(TextBlock.FontWeightProperty, FontWeights.Bold));
+        textStyle.Triggers.Add(boldWhenSelected);
+        text.SetValue(FrameworkElement.StyleProperty, textStyle);
+
+        panel.AppendChild(toggle);
+        panel.AppendChild(text);
+        template.VisualTree = panel;
+        _deviceList.ItemTemplate = template;
+    }
+
+    private async void DeviceSwitch_Checked(object sender, RoutedEventArgs e)
+    {
+        if (sender is not ToggleButton { DataContext: DeviceItem item } || LinkOf(item.Device) is not null)
+        {
+            return; // 銶态同步引发的翻转（连接失败回弹等），非用户拨动
+        }
+
+        try
+        {
+            _deviceList.SelectedItem = item; // 参数面板跟随，连接读的是该设备参数
+            await ConnectDeviceCoreAsync(item.Device);
+        }
+        catch (Exception ex)
+        {
+            SetStatus($"{item.Device.Name} 连接失败: {ex.Message}");
+            _log($"[通信管理] {item.Device.Name} 连接失败: {ex.Message}");
+        }
+    }
+
+    private void DeviceSwitch_Unchecked(object sender, RoutedEventArgs e)
+    {
+        if (sender is not ToggleButton { DataContext: DeviceItem item } || LinkOf(item.Device) is null)
+        {
+            return; // 状态同步引发的翻转，非用户主动断开
+        }
+
+        DisconnectDevice(item.Device);
+        SetStatus($"{item.Device.Name} 已断开");
+        _log($"[通信管理] 通信设备已断开: {item.Device.Name}");
     }
 
     private UIElement BuildContent()
@@ -91,7 +274,6 @@ public sealed class CommManagementDialog : Window
         listButtons.Children.Add(Button("删除", DeleteDeviceAsync));
         DockPanel.SetDock(listButtons, Dock.Bottom);
         left.Children.Add(listButtons);
-        _deviceList.DisplayMemberPath = nameof(CommDevice.Name);
         _deviceList.Margin = new Thickness(0, 0, 10, 0);
         _deviceList.SelectionChanged += DeviceList_SelectionChanged;
         left.Children.Add(_deviceList);
@@ -125,6 +307,11 @@ public sealed class CommManagementDialog : Window
 
     private void BuildParameterPanel(Panel panel)
     {
+        // 参数面板归属指示：这里编辑的是左侧列表选中行的设备（选中行有蓝底+描边+加粗标识）
+        _paramDeviceHeader.FontWeight = FontWeights.Bold;
+        _paramDeviceHeader.Foreground = (Brush)(Application.Current.TryFindResource("AccentBrush") ?? Brushes.DodgerBlue);
+        _paramDeviceHeader.Margin = new Thickness(0, 0, 0, 4);
+        panel.Children.Add(_paramDeviceHeader);
         AddLabeled(panel, "设备名称", _name);
         foreach (var protocol in Protocols)
         {
@@ -133,6 +320,10 @@ public sealed class CommManagementDialog : Window
 
         _protocol.SelectionChanged += (_, _) => RefreshProtocolFields();
         AddLabeled(panel, "协议类型", _protocol);
+        _protocolHint.Foreground = Brushes.Gray;
+        _protocolHint.TextWrapping = TextWrapping.Wrap;
+        _protocolHint.Margin = new Thickness(0, 0, 0, 2);
+        panel.Children.Add(_protocolHint);
         AddLabeled(panel, "目标IP (客户端/UDP)", _host);
         AddLabeled(panel, "端口 (连接/监听/本地)", _port);
         AddLabeled(panel, "串口名", _serialPortName);
@@ -164,14 +355,27 @@ public sealed class CommManagementDialog : Window
         _sendText.Height = 28;
         sendRow.Children.Add(_sendText);
         panel.Children.Add(sendRow);
+        RefreshProtocolFields();
     }
 
-    /// <summary>按协议类型显隐参数行：网络协议显示 IP/端口，串口显示串口参数。</summary>
+    /// <summary>按协议类型显隐参数行：TCP客户端/UDP 显示目标IP，TCP服务端只显示端口（绑定全部网卡），串口显示串口参数；并更新协议方向提示。</summary>
     private void RefreshProtocolFields()
     {
-        var isSerial = string.Equals(_protocol.SelectedItem as string, "串口", StringComparison.Ordinal);
-        SetVisible([_host, _port], !isSerial);
+        var protocol = _protocol.SelectedItem as string;
+        var isSerial = string.Equals(protocol, "串口", StringComparison.Ordinal);
+        var showHost = string.Equals(protocol, "TCP客户端", StringComparison.Ordinal) || string.Equals(protocol, "UDP", StringComparison.Ordinal);
+        SetVisible([_host], showHost);
+        SetVisible([_port], !isSerial);
         SetVisible([_serialPortName, _baudRate, _dataBits, _parity, _stopBits], isSerial);
+        _protocolHint.Text = protocol switch
+        {
+            "TCP客户端" => "本机作为客户端主动连接 目标IP:端口，对端须先开启服务端；要被对端接入请改选「TCP服务端」。",
+            "TCP服务端" => "本机监听 端口（绑定 0.0.0.0 全部网卡，对端连本机任意 IP 均可接入），等待对端作为客户端接入。",
+            "UDP" => "绑定本地 端口 收包；目标IP 为发送目标（留空=回发最近来包对端）。",
+            "串口" => "打开本机串口收发（COM 名/波特率/校验等参数）。",
+            null => "请选择协议类型。",
+            _ => "暂未支持（真实 PLC 协议待品牌确认）。",
+        };
     }
 
     private void SetVisible(IReadOnlyList<Control> controls, bool visible)
@@ -215,10 +419,11 @@ public sealed class CommManagementDialog : Window
 
     private void RefreshDeviceList(CommDevice? selected)
     {
+        _items = _devices.Select(d => new DeviceItem(d) { IsConnected = LinkOf(d) is not null }).ToList();
         _deviceList.ItemsSource = null;
-        _deviceList.ItemsSource = _devices;
-        _deviceList.SelectedItem = selected is null ? null : _devices.FirstOrDefault(d => ReferenceEquals(d, selected));
-        if (selected is null && _devices.Count > 0)
+        _deviceList.ItemsSource = _items;
+        _deviceList.SelectedItem = selected is null ? null : _items.FirstOrDefault(i => ReferenceEquals(i.Device, selected));
+        if (selected is null && _items.Count > 0)
         {
             _deviceList.SelectedIndex = 0;
         }
@@ -226,21 +431,23 @@ public sealed class CommManagementDialog : Window
 
     private void DeviceList_SelectionChanged(object sender, SelectionChangedEventArgs e)
     {
-        DisposeLink();
+        // 链路按设备独立持有，切换选中项不断开连接
         LoadSelectedToFields();
     }
 
-    private CommDevice? SelectedDevice => _deviceList.SelectedItem as CommDevice;
+    private CommDevice? SelectedDevice => (_deviceList.SelectedItem as DeviceItem)?.Device;
 
-    private void DisposeLink()
+    /// <summary>参数面板归属指示：当前编辑的是哪台设备（选中变更/实时改名都跟随刷新）。</summary>
+    private void UpdateParamDeviceHeader()
     {
-        _link?.Dispose();
-        _link = null;
+        var device = SelectedDevice;
+        _paramDeviceHeader.Text = device is null ? "参数设备：（未选中）" : $"参数设备：{device.Display}";
     }
 
     private void LoadSelectedToFields()
     {
         var device = SelectedDevice;
+        UpdateParamDeviceHeader();
         if (device is null)
         {
             _name.Text = "";
@@ -300,7 +507,7 @@ public sealed class CommManagementDialog : Window
             return Task.CompletedTask;
         }
 
-        DisposeLink();
+        DisconnectDevice(device);
         _devices.Remove(device);
         _store?.Save(_devices);
         RefreshDeviceList(null);
@@ -317,22 +524,30 @@ public sealed class CommManagementDialog : Window
         }
 
         FillDeviceFromFields(device);
+        UpdateParamDeviceHeader();
         _store?.Save(_devices);
-        RefreshDeviceList(device);
+        // 名称/参数经 PropertyChanged 与字段写回已实时呈现，这里只落盘；不重建列表（否则会误断活动链路）
         _status.Text = "设备配置已保存";
         _log($"[通信管理] 设备已保存: {device.Name} ({DescribeDevice(device)})");
         return Task.CompletedTask;
     }
 
-    private async Task ConnectAsync()
+    private Task ConnectAsync()
     {
         if (SelectedDevice is not { } device)
         {
             _status.Text = "请先选择设备";
-            return;
+            return Task.CompletedTask;
         }
 
+        return ConnectDeviceCoreAsync(device);
+    }
+
+    /// <summary>连接指定设备（「连接」按钮与设备行开关共用）：重复点连接=按新参数重连。</summary>
+    private async Task ConnectDeviceCoreAsync(CommDevice device)
+    {
         FillDeviceFromFields(device);
+        UpdateParamDeviceHeader();
         _store?.Save(_devices);
         if (string.Equals(device.Protocol, "ModBus通信", StringComparison.Ordinal))
         {
@@ -340,23 +555,47 @@ public sealed class CommManagementDialog : Window
             return;
         }
 
-        DisposeLink();
+        if (string.Equals(device.Protocol, "TCP客户端", StringComparison.Ordinal) && string.IsNullOrWhiteSpace(device.Host))
+        {
+            _status.Text = "目标IP 不能为空（TCP客户端 需指定对端 IP；要被对端接入请改选「TCP服务端」）";
+            return;
+        }
+
+        if (_commRuntime?.IsHeld(device.Name) == true)
+        {
+            _status.Text = $"设备「{device.Name}」正被方案的发送/接收数据节点占用（生产链路），请先停用相关节点";
+            _log($"[通信管理] 拒绝连接 {device.Name}: 设备被方案的发送/接收数据节点占用");
+            return;
+        }
+
+        DisconnectDevice(device);
         var link = CommLinkFactory.Create(device);
         link.TextReceived = text => AppendReceive($"<< {text}");
-        link.StatusChanged = text => AppendReceive($"-- {text}");
-        link.LinkClosed = text => AppendReceive($"-- {text}");
+        link.StatusChanged = text =>
+        {
+            AppendReceive($"-- {text}");
+            SetStatus($"{device.Name}: {text}");
+        };
+        link.LinkClosed = text =>
+        {
+            AppendReceive($"-- {text}");
+            SetStatus($"{device.Name}: {text}");
+        };
         link.SetTerminator(device.Terminator);
-        _link = link;
+        SetStatus($"{device.Name}（{DescribeDevice(device)}）连接中…");
         try
         {
             await link.StartAsync(device);
         }
-        catch
+        catch (Exception ex)
         {
-            DisposeLink();
+            link.Dispose();
+            SetStatus($"{device.Name} 连接失败: {ex.Message}");
             throw;
         }
 
+        _connected.Add((device, link));
+        MarkConnected(device, true);
         _log($"[通信管理] {device.Name} 已启动（{DescribeDevice(device)}）");
     }
 
@@ -370,9 +609,15 @@ public sealed class CommManagementDialog : Window
 
     private Task DisconnectAsync()
     {
-        DisposeLink();
-        _status.Text = "已断开";
-        _log("[通信管理] 通信设备已断开");
+        if (SelectedDevice is not { } device)
+        {
+            _status.Text = "请先选择设备";
+            return Task.CompletedTask;
+        }
+
+        DisconnectDevice(device);
+        _status.Text = $"{device.Name} 已断开";
+        _log($"[通信管理] 通信设备已断开: {device.Name}");
         return Task.CompletedTask;
     }
 
@@ -384,13 +629,14 @@ public sealed class CommManagementDialog : Window
             return;
         }
 
-        if (_link is null)
+        var link = LinkOf(device);
+        if (link is null)
         {
-            _status.Text = "通信设备未连接，请先点「连接」";
+            _status.Text = $"{device.Name} 未连接，请先打开设备行「连接」开关";
             return;
         }
 
-        await _link.SendTextAsync(_sendText.Text);
+        await link.SendTextAsync(_sendText.Text);
         AppendReceive($">> {_sendText.Text}");
         _status.Text = $"已发送到 {device.Name}: {_sendText.Text}";
     }
@@ -438,7 +684,7 @@ public sealed class CommManagementDialog : Window
 
     protected override void OnClosed(EventArgs e)
     {
-        DisposeLink();
+        DisposeAllLinks();
         base.OnClosed(e);
     }
 }

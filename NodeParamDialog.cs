@@ -1,10 +1,10 @@
 using System.Windows;
 using System.Windows.Controls;
 using System.Windows.Media;
-using SpeakerVisionInspection.Detection;
-using SpeakerVisionInspection.Models;
+using VisionInspection.Detection;
+using VisionInspection.Models;
 
-namespace SpeakerVisionInspection;
+namespace VisionInspection;
 
 /// <summary>
 /// 节点参数弹窗（非模态、单实例）：每个节点的参数内容弹出独立窗口编辑。

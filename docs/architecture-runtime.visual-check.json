@@ -6,7 +6,7 @@
   "status": "pass",
   "visualReview": "pending",
   "artifact": {
-    "path": "D:\\AiProjects\\speaker-inspection\\SpeakerVisionInspection\\docs\\architecture-runtime.html",
+    "path": "D:\\AiProjects\\speaker-inspection\\VisionInspection\\docs\\architecture-runtime.html",
     "sha256": "44d7e4dac7c37ffad2ab933a3bf6caab52ba80621d3aa4d0fad5fa44f1eeec47",
     "bytes": 722084
   },

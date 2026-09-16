@@ -1,6 +1,6 @@
 using CommunityToolkit.Mvvm.ComponentModel;
 
-namespace SpeakerVisionInspection;
+namespace VisionInspection;
 
 /// <summary>
 /// 主窗口的可观察状态。检测、设备和 ROI 逻辑仍由现有应用服务负责，ViewModel 只承载可绑定的界面状态。

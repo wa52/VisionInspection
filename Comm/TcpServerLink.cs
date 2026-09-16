@@ -2,7 +2,7 @@ using System.Net;
 using System.Net.Sockets;
 using System.Text;
 
-namespace SpeakerVisionInspection.Comm;
+namespace VisionInspection.Comm;
 
 /// <summary>
 /// TCP 服务端链路：绑定本地端口等待 PLC 接入（常见：PLC 作客户端主动连视觉机）。
@@ -14,7 +14,6 @@ public sealed class TcpServerLink : CommLinkBase
     private TcpListener? _listener;
     private TcpClient? _peer;
     private CancellationTokenSource? _cts;
-    private LineAccumulator? _accumulator;
     private int _listenPort;
 
     public override bool IsReady
@@ -42,7 +41,7 @@ public sealed class TcpServerLink : CommLinkBase
     public override async Task StartAsync(CommDevice device, CancellationToken cancellationToken = default)
     {
         Stop();
-        _accumulator = CreateAccumulator();
+        InitAccumulator();
         _listenPort = Math.Max(1, device.Port);
         var listener = new TcpListener(IPAddress.Any, _listenPort);
         listener.Start();
@@ -52,9 +51,30 @@ public sealed class TcpServerLink : CommLinkBase
             _cts = new CancellationTokenSource();
         }
 
-        EmitStatus($"监听中 0.0.0.0:{_listenPort}，等待客户端接入…");
+        EmitStatus($"监听中 0.0.0.0:{_listenPort}（0.0.0.0=本机全部网卡，对端连本机任意 IP 的 {_listenPort} 端口均可接入），等待客户端接入… 本机 IPv4: {LocalIpv4Summary()}");
         _ = Task.Run(() => AcceptLoopAsync(listener, _cts!.Token), CancellationToken.None);
         await Task.CompletedTask;
+    }
+
+    /// <summary>本机可用 IPv4（联调提示：告诉对端可以连哪个 IP；拿不到时至少回环可用）。</summary>
+    private static string LocalIpv4Summary()
+    {
+        try
+        {
+            var addresses = System.Net.NetworkInformation.NetworkInterface.GetAllNetworkInterfaces()
+                .Where(n => n.OperationalStatus == System.Net.NetworkInformation.OperationalStatus.Up
+                            && n.NetworkInterfaceType != System.Net.NetworkInformation.NetworkInterfaceType.Loopback)
+                .SelectMany(n => n.GetIPProperties().UnicastAddresses)
+                .Where(a => a.Address.AddressFamily == AddressFamily.InterNetwork)
+                .Select(a => a.Address.ToString())
+                .Distinct()
+                .ToList();
+            return addresses.Count > 0 ? string.Join(" / ", addresses) : "127.0.0.1";
+        }
+        catch
+        {
+            return "127.0.0.1";
+        }
     }
 
     private async Task AcceptLoopAsync(TcpListener listener, CancellationToken token)
@@ -144,10 +164,7 @@ public sealed class TcpServerLink : CommLinkBase
                 return;
             }
 
-            foreach (var line in _accumulator!.Feed(Encoding.UTF8.GetString(buffer, 0, read)))
-            {
-                Emit(line);
-            }
+            ReceiveChunk(Encoding.UTF8.GetString(buffer, 0, read));
         }
     }
 
@@ -165,6 +182,7 @@ public sealed class TcpServerLink : CommLinkBase
             _cts = null;
         }
 
+        ResetReceiveState();
         peer?.Close();
         listener?.Stop();
     }

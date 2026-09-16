@@ -1,12 +1,43 @@
-namespace SpeakerVisionInspection.Comm;
+namespace VisionInspection.Comm;
 
 /// <summary>通信设备配置（VM 通信管理式设备条目）。</summary>
-public sealed record CommDevice
+public sealed record CommDevice : System.ComponentModel.INotifyPropertyChanged
 {
-    public string Name { get; set; } = "PLC";
+    private string _name = "PLC";
+    private string _protocol = "TCP客户端";
+
+    public string Name
+    {
+        get => _name;
+        set
+        {
+            _name = value;
+            OnPropertyChanged(nameof(Name));
+            OnPropertyChanged(nameof(Display));
+        }
+    }
 
     /// <summary>协议类型：TCP客户端 / TCP服务端 / UDP / 串口 可用，ModBus通信 为占位。</summary>
-    public string Protocol { get; set; } = "TCP客户端";
+    public string Protocol
+    {
+        get => _protocol;
+        set
+        {
+            _protocol = value;
+            OnPropertyChanged(nameof(Protocol));
+            OnPropertyChanged(nameof(Display));
+        }
+    }
+
+    /// <summary>通信管理设备列表显示文本：名称（协议类型）。Name/Protocol 任一变更即发通知实时刷新。</summary>
+    [System.Text.Json.Serialization.JsonIgnore]
+    public string Display => $"{Name}（{Protocol}）";
+
+    /// <summary>名称/协议变更通知（设备列表 DisplayMemberPath 绑定消费）。</summary>
+    public event System.ComponentModel.PropertyChangedEventHandler? PropertyChanged;
+
+    private void OnPropertyChanged(string propertyName) =>
+        PropertyChanged?.Invoke(this, new System.ComponentModel.PropertyChangedEventArgs(propertyName));
 
     /// <summary>TCP客户端/UDP：目标IP；TCP服务端不使用（绑定本机全部网卡）。</summary>
     public string Host { get; set; } = "192.168.0.1";

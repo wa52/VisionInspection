@@ -1,4 +1,4 @@
-namespace SpeakerVisionInspection.Camera;
+namespace VisionInspection.Camera;
 
 /// <summary>采集参数（MVS 参数键见 MvCameraControlCameraController）。</summary>
 public sealed record CameraParameters

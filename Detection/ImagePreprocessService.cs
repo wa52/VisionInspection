@@ -2,7 +2,7 @@ using System.IO;
 using Microsoft.ML.OnnxRuntime.Tensors;
 using OpenCvSharp;
 
-namespace SpeakerVisionInspection.Detection;
+namespace VisionInspection.Detection;
 
 /// <summary>
 /// 与 Python Preprocessor 完全一致的预处理：短边缩放(INTER_AREA) -> 中心裁剪 -> BGR→RGB -> /255 -> ImageNet 归一化 -> CHW。

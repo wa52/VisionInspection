@@ -1,4 +1,4 @@
-namespace SpeakerVisionInspection.Camera;
+namespace VisionInspection.Camera;
 
 public enum CameraConnectionState
 {

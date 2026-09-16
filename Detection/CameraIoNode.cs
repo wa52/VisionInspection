@@ -1,8 +1,8 @@
 using OpenCvSharp;
-using SpeakerVisionInspection.Camera;
-using SpeakerVisionInspection.Models;
+using VisionInspection.Camera;
+using VisionInspection.Models;
 
-namespace SpeakerVisionInspection.Detection;
+namespace VisionInspection.Detection;
 
 /// <summary>
 /// 相机 IO 通信节点（海康式自包含）：输出配置（输出线/Strobe 源/有效电平/持续时间）全部是本节点参数，

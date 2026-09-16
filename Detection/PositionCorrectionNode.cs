@@ -1,7 +1,7 @@
 using OpenCvSharp;
-using SpeakerVisionInspection.Models;
+using VisionInspection.Models;
 
-namespace SpeakerVisionInspection.Detection;
+namespace VisionInspection.Detection;
 
 /// <summary>
 /// 位置修正节点（VisionMaster 位置修正同类，工具节点）：

@@ -1,7 +1,7 @@
 using System.IO;
 using System.Text.Json;
 
-namespace SpeakerVisionInspection.Comm;
+namespace VisionInspection.Comm;
 
 /// <summary>通信设备列表持久化（comm.json，与 camera.json 同目录）。</summary>
 public sealed class CommDeviceStore

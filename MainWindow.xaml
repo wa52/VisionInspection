@@ -1,7 +1,7 @@
-﻿<Window x:Class="SpeakerVisionInspection.MainWindow"
+﻿<Window x:Class="VisionInspection.MainWindow"
         xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
         xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
-        xmlns:local="clr-namespace:SpeakerVisionInspection"
+        xmlns:local="clr-namespace:VisionInspection"
         Title="视觉检测平台" Height="920" Width="1560"
         WindowStartupLocation="CenterScreen" Closed="Window_Closed"
         PreviewKeyDown="Window_PreviewKeyDown"
@@ -116,7 +116,7 @@
                               Width="18" Height="18" Stretch="Uniform" />
                     </Button>
 
-                    <TextBlock x:Name="FinalVerdictText" Text="待机" FontSize="17" FontWeight="Bold"
+                    <TextBlock x:Name="FinalVerdictText" Text="{Binding FinalDecision, FallbackValue=待机}" FontSize="17" FontWeight="Bold"
                                HorizontalAlignment="Right" VerticalAlignment="Center" Margin="0,0,8,0"
                                Foreground="{StaticResource MutedTextBrush}" />
                 </DockPanel>
@@ -140,15 +140,15 @@
                         <StackPanel>
                             <StackPanel Orientation="Horizontal">
                                 <Ellipse x:Name="StateDot" Width="12" Height="12" Fill="#888" Margin="0,0,6,0" VerticalAlignment="Center" />
-                                <TextBlock x:Name="StateText" Text="空闲" VerticalAlignment="Center" FontWeight="Bold" />
+                                <TextBlock x:Name="StateText" Text="{Binding ProductionState, FallbackValue=空闲}" VerticalAlignment="Center" FontWeight="Bold" />
                             </StackPanel>
-                            <TextBlock x:Name="StateDetailText" Text="-" Foreground="#888" Margin="18,2,0,0" TextWrapping="Wrap" />
+                            <TextBlock x:Name="StateDetailText" Text="{Binding ProductionDetail, FallbackValue=-}" Visibility="Collapsed" />
                         </StackPanel>
                     </GroupBox>
 
                     <GroupBox Header="检测流程" Margin="6">
                         <DockPanel>
-                            <Button Content="+ 添加模块" DockPanel.Dock="Top" Height="26" Margin="2,0,2,6" Click="AddNode_Click" />
+                            <Button x:Name="BtnAddNode" Content="+ 添加模块" DockPanel.Dock="Top" Height="26" Margin="2,0,2,6" Click="AddNode_Click" />
                             <TreeView x:Name="NodeTree" Background="Transparent" SelectedItemChanged="NodeTree_SelectedItemChanged" MouseDoubleClick="NodeTree_MouseDoubleClick" />
                         </DockPanel>
                     </GroupBox>
@@ -162,16 +162,44 @@
                     <ScrollViewer x:Name="ThumbStripHost" DockPanel.Dock="Bottom" Visibility="Collapsed" HorizontalScrollBarVisibility="Auto" VerticalScrollBarVisibility="Disabled" Height="116" Background="#101010">
                         <StackPanel x:Name="ThumbStrip" Orientation="Horizontal" Margin="2" />
                     </ScrollViewer>
-                    <Grid>
+                    <Grid x:Name="ImageViewport" ClipToBounds="True"
+                          PreviewMouseWheel="ImageViewport_PreviewMouseWheel"
+                          PreviewMouseDown="ImageViewport_PreviewMouseDown"
+                          PreviewMouseMove="ImageViewport_PreviewMouseMove"
+                          PreviewMouseUp="ImageViewport_PreviewMouseUp">
                         <!-- 叠放顺序：图片最底 → ROI 叠加层 → 标题/缩略图按钮置顶（否则结果图会盖住按钮导致点击失效） -->
-                        <Image x:Name="ResultImage" Stretch="Uniform" Margin="2" />
+                        <Image x:Name="ResultImage" Stretch="Uniform" Margin="2"
+                               RenderTransformOrigin="0.5,0.5" />
                         <Canvas x:Name="RoiCanvas" Margin="2" Background="Transparent" IsHitTestVisible="False"
+                                RenderTransformOrigin="0.5,0.5"
                                 MouseLeftButtonDown="RoiCanvas_MouseLeftButtonDown"
                                 MouseMove="RoiCanvas_MouseMove"
                                 MouseLeftButtonUp="RoiCanvas_MouseLeftButtonUp"
                                 MouseRightButtonUp="RoiCanvas_MouseRightButtonUp" />
                         <TextBlock x:Name="ResultCaption" Text="执行结果" HorizontalAlignment="Left" VerticalAlignment="Top" Margin="6" Foreground="{StaticResource MutedTextBrush}" FontSize="11" />
-                        <ToggleButton x:Name="BtnThumbToggle" Content="缩略图" Width="58" Height="20" HorizontalAlignment="Right" VerticalAlignment="Top" Margin="0,4,6,0" FontSize="11" Click="BtnThumbToggle_Click" ToolTip="显示/隐藏各节点图像缩略图条" />
+                        <StackPanel Orientation="Horizontal" HorizontalAlignment="Right" VerticalAlignment="Top" Margin="0,4,6,0">
+                            <Button Style="{StaticResource ToolBarIconBtn}" Click="BtnZoomIn_Click" ToolTip="放大图像">
+                                <Path Stroke="{StaticResource TextBrush}" StrokeThickness="1.7" StrokeStartLineCap="Round" StrokeEndLineCap="Round"
+                                      Data="M10,3 A7,7 0 1 0 10,17 A7,7 0 1 0 10,3 M15,15 L21,21 M10,6 L10,14 M6,10 L14,10"
+                                      Width="18" Height="18" Stretch="Uniform" />
+                            </Button>
+                            <Button Style="{StaticResource ToolBarIconBtn}" Click="BtnZoomOut_Click" ToolTip="缩小图像">
+                                <Path Stroke="{StaticResource TextBrush}" StrokeThickness="1.7" StrokeStartLineCap="Round" StrokeEndLineCap="Round"
+                                      Data="M10,3 A7,7 0 1 0 10,17 A7,7 0 1 0 10,3 M15,15 L21,21 M6,10 L14,10"
+                                      Width="18" Height="18" Stretch="Uniform" />
+                            </Button>
+                            <Button Style="{StaticResource ToolBarIconBtn}" Click="BtnImageFit_Click" ToolTip="适应窗口">
+                                <Path Stroke="{StaticResource TextBrush}" StrokeThickness="1.7" StrokeStartLineCap="Round" StrokeEndLineCap="Round" StrokeLineJoin="Round"
+                                      Data="M3,8 L3,3 L8,3 M16,3 L21,3 L21,8 M21,16 L21,21 L16,21 M8,21 L3,21 L3,16"
+                                      Width="18" Height="18" Stretch="Uniform" />
+                            </Button>
+                            <ToggleButton x:Name="BtnThumbToggle" Width="34" Height="30" Padding="0" Margin="2,0,0,0"
+                                          Click="BtnThumbToggle_Click" ToolTip="显示/隐藏节点缩略图">
+                                <Path Stroke="{StaticResource TextBrush}" StrokeThickness="1.7" StrokeStartLineCap="Round" StrokeEndLineCap="Round" StrokeLineJoin="Round"
+                                      Data="M3,5 L21,5 L21,19 L3,19 Z M6,15 L10,11 L13,14 L16,11 L19,15"
+                                      Width="18" Height="18" Stretch="Uniform" />
+                            </ToggleButton>
+                        </StackPanel>
                     </Grid>
                 </DockPanel>
             </Border>
@@ -224,13 +252,11 @@
 
         <!-- ===== 状态栏 ===== -->
         <StatusBar Grid.Row="3">
-            <StatusBarItem><TextBlock x:Name="StatusSdk" Text="SDK: 检查中" /></StatusBarItem>
+            <StatusBarItem><TextBlock x:Name="StatusCamera" Text="{Binding CameraStatus, FallbackValue=相机: 未连接}" /></StatusBarItem>
             <Separator />
-            <StatusBarItem><TextBlock x:Name="StatusCamera" Text="相机: 未连接" /></StatusBarItem>
+            <StatusBarItem><TextBlock x:Name="StatusTrigger" Text="{Binding TriggerStatus, FallbackValue=触发: -}" /></StatusBarItem>
             <Separator />
-            <StatusBarItem><TextBlock x:Name="StatusTrigger" Text="触发: -" /></StatusBarItem>
-            <Separator />
-            <StatusBarItem><TextBlock x:Name="StatusFps" Text="FPS: -" /></StatusBarItem>
+            <StatusBarItem><TextBlock x:Name="StatusFps" Text="{Binding FpsStatus, FallbackValue=FPS: -}" /></StatusBarItem>
         </StatusBar>
     </Grid>
 </Window>

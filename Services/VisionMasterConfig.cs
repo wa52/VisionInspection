@@ -1,4 +1,4 @@
-namespace SpeakerVisionInspection.Services;
+namespace VisionInspection.Services;
 
 /// <summary>相机运行时配置。名称保留以兼容现有调用，程序不依赖 VisionMaster 或其授权服务。</summary>
 public sealed record VisionMasterConfig

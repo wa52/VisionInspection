@@ -1,8 +1,8 @@
 using System.IO;
 using OpenCvSharp;
-using SpeakerVisionInspection.Models;
+using VisionInspection.Models;
 
-namespace SpeakerVisionInspection.Detection;
+namespace VisionInspection.Detection;
 
 /// <summary>
 /// 图像源节点：流程的图像来源，支持两种模式（source_kind）。

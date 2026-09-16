@@ -1,7 +1,7 @@
 using OpenCvSharp;
-using SpeakerVisionInspection.Models;
+using VisionInspection.Models;
 
-namespace SpeakerVisionInspection.Detection;
+namespace VisionInspection.Detection;
 
 /// <summary>
 /// 条件检测节点：用其 Rules 对 ctx 中已跑节点的输出求值（Rule 间 OR / 条件内 AND）。

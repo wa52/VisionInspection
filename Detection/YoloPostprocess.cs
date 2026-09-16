@@ -1,4 +1,4 @@
-namespace SpeakerVisionInspection.Detection;
+namespace VisionInspection.Detection;
 
 /// <summary>单个 YOLO 检测结果（源图像素坐标，中心点表示）。</summary>
 public readonly record struct YoloDetection(int ClassIndex, string Class, float Conf, double Cx, double Cy, double W, double H);

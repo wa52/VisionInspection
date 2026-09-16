@@ -1,6 +1,6 @@
 using System.IO;
 
-namespace SpeakerVisionInspection.Services;
+namespace VisionInspection.Services;
 
 public sealed record EnvironmentCheckItem(string Name, bool Ok, string Detail);
 

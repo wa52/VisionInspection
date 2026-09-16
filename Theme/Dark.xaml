@@ -279,6 +279,12 @@
         <Setter Property="Foreground" Value="{StaticResource TextBrush}" />
         <Setter Property="Background" Value="Transparent" />
         <Setter Property="Padding" Value="3,2" />
+        <Style.Resources>
+            <SolidColorBrush x:Key="{x:Static SystemColors.HighlightBrushKey}" Color="#263F62" />
+            <SolidColorBrush x:Key="{x:Static SystemColors.HighlightTextBrushKey}" Color="#F2F5F9" />
+            <SolidColorBrush x:Key="{x:Static SystemColors.InactiveSelectionHighlightBrushKey}" Color="#263F62" />
+            <SolidColorBrush x:Key="{x:Static SystemColors.InactiveSelectionHighlightTextBrushKey}" Color="#F2F5F9" />
+        </Style.Resources>
         <Style.Triggers>
             <Trigger Property="IsSelected" Value="True">
                 <Setter Property="Background" Value="{StaticResource SelBrush}" />

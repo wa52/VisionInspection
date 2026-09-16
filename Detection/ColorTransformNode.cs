@@ -1,7 +1,7 @@
 using OpenCvSharp;
-using SpeakerVisionInspection.Models;
+using VisionInspection.Models;
 
-namespace SpeakerVisionInspection.Detection;
+namespace VisionInspection.Detection;
 
 /// <summary>
 /// 颜色变换节点（参照海康 VisionMaster 颜色变换）：任意来源图 → 灰度图。

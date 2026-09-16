@@ -1,8 +1,8 @@
 using System.IO;
 using OpenCvSharp;
-using SpeakerVisionInspection.Models;
+using VisionInspection.Models;
 
-namespace SpeakerVisionInspection.Detection;
+namespace VisionInspection.Detection;
 
 /// <summary>
 /// 输出图像节点：把原图或某个上游节点的输出图，按当前判定保存到指定目录。
@@ -13,7 +13,7 @@ public sealed class SaveImageNode : IModelNode
     public static readonly IReadOnlyList<ParamDef> StaticParamDefs =
     [
         new ParamDef { Key = "source", Label = "图像来源", Kind = "nodesource", Default = "@input" },
-        new ParamDef { Key = "save_mode", Label = "保存类型", Kind = "choice", Default = "全部", Choices = ["全部", "仅OK", "仅NG"] },
+        new ParamDef { Key = "save_mode", Label = "检测结果保存类型", Kind = "choice", Default = "全部", Choices = ["全部", "仅OK", "仅NG", "不保存"] },
         new ParamDef { Key = "dir", Label = "保存目录", Kind = "folder", Default = @"D:\vision\vm_output" },
     ];
 
@@ -44,11 +44,12 @@ public sealed class SaveImageNode : IModelNode
     public IReadOnlyDictionary<string, string> Params => _params;
     public void SetParam(string key, string value) => _params[key] = value;
 
-    /// <summary>保存门槛归一化：新配方存中文（全部/仅OK/仅NG），旧配方存 all/ok/ng，两者都接受。</summary>
+    /// <summary>保存门槛归一化：新配方存中文（全部/仅OK/仅NG/不保存），旧配方存 all/ok/ng，两者都接受。</summary>
     internal static string NormalizeMode(string? mode) => (mode ?? "").Trim() switch
     {
         "仅OK" or "ok" => "ok",
         "仅NG" or "ng" => "ng",
+        "不保存" or "none" or "off" => "none",
         _ => "all",
     };
 
@@ -57,6 +58,7 @@ public sealed class SaveImageNode : IModelNode
     {
         "ok" => decision == "OK",
         "ng" => decision == "NG",
+        "none" => false,
         _ => true,
     };
 

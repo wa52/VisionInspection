@@ -1,8 +1,8 @@
 using System.Windows.Input;
 using OpenCvSharp;
-using SpeakerVisionInspection.Models;
+using VisionInspection.Models;
 
-namespace SpeakerVisionInspection.Detection;
+namespace VisionInspection.Detection;
 
 /// <summary>
 /// 按键控制节点（工具节点，恒 OK）：为检测流程绑定一个常用键盘键位（空格/F5/F8/F12/Enter）。

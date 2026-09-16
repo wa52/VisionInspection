@@ -1,7 +1,7 @@
 using System.IO.Ports;
 using System.Text;
 
-namespace SpeakerVisionInspection.Comm;
+namespace VisionInspection.Comm;
 
 /// <summary>
 /// 串口链路（RS232/485）：按 串口名/波特率/数据位/校验位/停止位 打开，后台读循环收包。
@@ -11,7 +11,6 @@ public sealed class SerialLink : CommLinkBase
     private readonly object _sync = new();
     private SerialPort? _port;
     private CancellationTokenSource? _cts;
-    private LineAccumulator? _accumulator;
 
     public override bool IsReady
     {
@@ -27,7 +26,7 @@ public sealed class SerialLink : CommLinkBase
     public override async Task StartAsync(CommDevice device, CancellationToken cancellationToken = default)
     {
         Stop();
-        _accumulator = CreateAccumulator();
+        InitAccumulator();
         var port = new SerialPort(device.SerialPortName, device.BaudRate, ParseParity(device.Parity), Math.Clamp(device.DataBits, 5, 8), ParseStopBits(device.StopBits))
         {
             ReadTimeout = 200,
@@ -74,10 +73,7 @@ public sealed class SerialLink : CommLinkBase
                     continue;
                 }
 
-                foreach (var line in _accumulator!.Feed(Encoding.UTF8.GetString(buffer, 0, read)))
-                {
-                    Emit(line);
-                }
+                ReceiveChunk(Encoding.UTF8.GetString(buffer, 0, read));
             }
         }
         catch (OperationCanceledException)
@@ -104,6 +100,7 @@ public sealed class SerialLink : CommLinkBase
             _cts = null;
         }
 
+        ResetReceiveState();
         if (port is null)
         {
             return;

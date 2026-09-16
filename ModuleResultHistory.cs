@@ -1,4 +1,4 @@
-namespace SpeakerVisionInspection;
+namespace VisionInspection;
 
 /// <summary>单个模块（节点）一次执行的运行记录（海康式：执行序号 + 时间 + 模块数据）。</summary>
 public sealed record ModuleRunRecord(int Seq, DateTime Time, IReadOnlyDictionary<string, string> Values)

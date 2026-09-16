@@ -1,7 +1,7 @@
 using OpenCvSharp;
-using SpeakerVisionInspection.Models;
+using VisionInspection.Models;
 
-namespace SpeakerVisionInspection.Detection;
+namespace VisionInspection.Detection;
 
 /// <summary>
 /// 几何变换节点：对原图或上游输出图依次应用 缩放 → 旋转 → 翻转（三个变换同时生效，填了就起作用）。

@@ -2,9 +2,9 @@ using System.Globalization;
 using System.Windows;
 using System.Windows.Controls;
 using System.Windows.Media;
-using SpeakerVisionInspection.Camera;
+using VisionInspection.Camera;
 
-namespace SpeakerVisionInspection;
+namespace VisionInspection;
 
 /// <summary>
 /// 相机管理窗口（设备级）：相机列表/连接/预览/软触发 + 采集参数 + 触发参数（含 PLC 输入沿）。
@@ -36,7 +36,6 @@ public sealed class CameraManagementDialog : Window
     private readonly TextBox _delay = new();
     private readonly TextBox _filter = new();
     private readonly TextBox _burstCount = new();
-    private readonly TextBox _interval = new();
     private readonly TextBox _timeout = new();
     private readonly ComboBox _ioLine = new();
     private readonly ComboBox _ioMode = new();
@@ -161,7 +160,6 @@ public sealed class CameraManagementDialog : Window
         AddLabeled(panel, "触发延迟 (us)", _delay);
         AddLabeled(panel, "输入滤波 (us)", _filter);
         AddLabeled(panel, "条件触发数 (帧/次)", _burstCount);
-        AddLabeled(panel, "最小间隔 (ms)", _interval);
         AddLabeled(panel, "取图超时 (ms)", _timeout);
         AddGroupHeader(panel, "IO 输出（设备控制）");
         _ioLine.Items.Add("Line1");
@@ -291,7 +289,6 @@ public sealed class CameraManagementDialog : Window
             TriggerDelayUs = Number(_delay.Text, 0),
             TriggerFilterUs = Number(_filter.Text, 0),
             BurstFrameCount = Math.Max(1, (int)Number(_burstCount.Text, 1)),
-            MinTriggerIntervalMs = Number(_interval.Text, 100),
             GrabTimeoutMs = Number(_timeout.Text, 500),
         };
         await _camera.ApplyTriggerSettingsAsync(trigger);
@@ -323,7 +320,6 @@ public sealed class CameraManagementDialog : Window
         _delay.Text = t.TriggerDelayUs.ToString("F0", CultureInfo.InvariantCulture);
         _filter.Text = t.TriggerFilterUs.ToString("F0", CultureInfo.InvariantCulture);
         _burstCount.Text = Math.Max(1, t.BurstFrameCount).ToString(CultureInfo.InvariantCulture);
-        _interval.Text = t.MinTriggerIntervalMs.ToString("F0", CultureInfo.InvariantCulture);
         _timeout.Text = t.GrabTimeoutMs.ToString("F0", CultureInfo.InvariantCulture);
         var io = _store?.LoadIoCommunicationSettings() ?? new IoCommunicationSettings();
         _ioLine.SelectedIndex = io.NgOutputLine == "Line2" ? 1 : io.NgOutputLine == "Line3" ? 2 : 0;

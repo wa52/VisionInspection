@@ -1,4 +1,4 @@
-namespace SpeakerVisionInspection.Plc;
+namespace VisionInspection.Plc;
 
 /// <summary>PLC 回传结果。</summary>
 public enum PlcResult

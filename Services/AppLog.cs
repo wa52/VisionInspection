@@ -1,7 +1,7 @@
 using System.IO;
 using System.Text;
 
-namespace SpeakerVisionInspection.Services;
+namespace VisionInspection.Services;
 
 public static class AppLog
 {

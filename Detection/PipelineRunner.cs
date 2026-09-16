@@ -1,7 +1,8 @@
 using OpenCvSharp;
-using SpeakerVisionInspection.Camera;
+using VisionInspection.Camera;
+using VisionInspection.Comm;
 
-namespace SpeakerVisionInspection.Detection;
+namespace VisionInspection.Detection;
 
 /// <summary>
 /// 流水线执行器：单次执行 / 连续执行（软件驱动的运行方式，脱离 PLC 硬触发链路）。
@@ -32,7 +33,8 @@ public sealed class PipelineRunner : IDisposable
     public async Task<PipelineResult> RunOnceAsync(
         Pipeline pipeline,
         string imageName,
-        Action<IoCommunicationSettings>? cameraIoOutput = null)
+        Action<IoCommunicationSettings>? cameraIoOutput = null,
+        ICommRuntime? commRuntime = null)
     {
         ArgumentNullException.ThrowIfNull(pipeline);
         BeginRun(continuous: false);
@@ -40,7 +42,7 @@ public sealed class PipelineRunner : IDisposable
         {
             using var input = new Mat();
             var result = await Task.Run(
-                () => pipeline.Run(input, imageName, null, cameraIoOutput));
+                () => pipeline.Run(input, imageName, null, cameraIoOutput, null, commRuntime));
             Completed?.Invoke(result);
             return result;
         }
@@ -54,7 +56,8 @@ public sealed class PipelineRunner : IDisposable
     public void StartContinuous(
         Pipeline pipeline,
         Func<string> imageNameFactory,
-        Action<IoCommunicationSettings>? cameraIoOutput = null)
+        Action<IoCommunicationSettings>? cameraIoOutput = null,
+        ICommRuntime? commRuntime = null)
     {
         ArgumentNullException.ThrowIfNull(pipeline);
         ArgumentNullException.ThrowIfNull(imageNameFactory);
@@ -85,7 +88,7 @@ public sealed class PipelineRunner : IDisposable
                         PipelineResult result;
                         try
                         {
-                            result = pipeline.Run(input, imageNameFactory(), null, cameraIoOutput);
+                            result = pipeline.Run(input, imageNameFactory(), null, cameraIoOutput, null, commRuntime);
                         }
                         catch (Exception ex)
                         {

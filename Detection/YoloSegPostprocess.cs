@@ -1,7 +1,7 @@
 using System;
 using System.Collections.Generic;
 
-namespace SpeakerVisionInspection.Detection;
+namespace VisionInspection.Detection;
 
 /// <summary>单个实例分割检测结果（模型输入像素坐标，中心点表示；含掩码系数与输出 anchor 索引）。</summary>
 public readonly record struct SegDetection(

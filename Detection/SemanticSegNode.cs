@@ -3,10 +3,10 @@ using System.Text;
 using Microsoft.ML.OnnxRuntime;
 using Microsoft.ML.OnnxRuntime.Tensors;
 using OpenCvSharp;
-using SpeakerVisionInspection.Models;
-using SpeakerVisionInspection.Services;
+using VisionInspection.Models;
+using VisionInspection.Services;
 
-namespace SpeakerVisionInspection.Detection;
+namespace VisionInspection.Detection;
 
 /// <summary>
 /// 语义分割节点（u训练 task=semantic，yolo26*-sem 导出 ONNX）。
@@ -22,8 +22,8 @@ public sealed class SemanticSegNode : IModelNode
         new ParamDef { Key = "model_dir", Label = "模型目录(best.onnx+classes.txt)", Kind = "folder" },
         new ParamDef { Key = "source", Label = "图像来源", Kind = "nodesource", Default = "@input" },
         new ParamDef { Key = "decision_mode", Label = "判定模式", Kind = "choice", Default = SegNode.DecisionRatioNg, Choices = [SegNode.DecisionRatioNg, SegNode.DecisionDetectNg, SegNode.DecisionMissingNg] },
-        new ParamDef { Key = "crop_dir", Label = "缺陷区切图保存目录(可选·按OK/NG分目录)", Kind = "folder", Default = "" },
-        new ParamDef { Key = "save_mode", Label = "整图保存", Kind = "choice", Default = "全部", Choices = ["全部", "仅OK", "仅NG"] },
+        new ParamDef { Key = "crop_dir", Label = "检测项ROI切图保存目录(可选·按OK/NG分目录)", Kind = "folder", Default = "" },
+        new ParamDef { Key = "save_mode", Label = "检测项切图保存类型", Kind = "choice", Default = "全部", Choices = ["全部", "仅OK", "仅NG", "不保存"] },
         new ParamDef { Key = "scope_index", Label = "总范围ROI索引(检测项管理设置)", Kind = "hidden", Default = "-1" },
     ];
 
@@ -165,6 +165,12 @@ public sealed class SemanticSegNode : IModelNode
         // ROI 解析：节点私有 own_rois（含检测项元数据）+ 位置修正；空 = 全图检测。
         // 检测项名 ↔ 模型类名匹配：名字命中的检测项只判该类；未命中/无检测项按全部非背景类别判定（不再使用「关注类别」参数）
         var (rois, metas) = ResolveRoisFull(img, ctx);
+        if (rois.Count == 0)
+        {
+            const string error = "未解析到有效检测项 ROI，已停止语义分割（请在本节点「检测项管理」中添加并启用检测项 ROI）";
+            Log?.Invoke($"[ROI] {Name}: {error}");
+            return new NodeResult { Decision = "ERROR", Error = error, OutputImage = img.Clone() };
+        }
         var roiClassMap = new List<IReadOnlyList<string>>(rois.Count);
         foreach (var (name, _) in rois)
         {
@@ -195,37 +201,52 @@ public sealed class SemanticSegNode : IModelNode
         }
 
         var cropRects = new List<Rect>();
-        if (rois.Count == 0)
+        for (var ri = 0; ri < rois.Count; ri++)
         {
+            var (name, rect) = rois[ri];
+            var meta = ri < metas.Count ? metas[ri] : new RoiMeta();
+            var (cx, cy, w, h, angle) = rect.ToPixels(img.Width, img.Height);
+            var cropRect = YoloNode.ComputeRoiCropRect((int)cx, (int)cy, w, h, angle, img.Width, img.Height);
+            cropRects.Add(cropRect);
+            if (!meta.Enabled)
+            {
+                roiActive.Add(false);
+                roiHasDefect.Add(false);
+                regionRatios.Add((name, -1)); // 停用：不检测
+                continue;
+            }
             roiActive.Add(true);
-            roiHasDefect.Add(false);
-            regionRatios.Add(("", 0));
-            cropRects.Add(new Rect(0, 0, img.Width, img.Height));
-            defectPixels += SegmentRegion(normalized, cropRects[0], Array.Empty<string>(), defectMask, classMap);
+            SegmentRegion(normalized, cropRect, roiClassMap[ri], defectMask, classMap);
+            long roiArea;
+            using (var preciseMask = NodeRois.CreateMask(rect, img.Width, img.Height))
+            using (var preciseCrop = new Mat(preciseMask, cropRect))
+            using (var defectCrop = new Mat(defectMask, cropRect))
+            using (var classCrop = new Mat(classMap, cropRect))
+            {
+                roiArea = Cv2.CountNonZero(preciseCrop);
+                Cv2.BitwiseAnd(defectCrop, preciseCrop, defectCrop);
+                Cv2.BitwiseAnd(classCrop, preciseCrop, classCrop);
+            }
+            using var filteredRegion = new Mat(defectMask, cropRect);
+            var regionDefect = Cv2.CountNonZero(filteredRegion);
+            roiHasDefect.Add(regionDefect > 0);
+            defectPixels += regionDefect;
+            var area = roiArea;
+            regionRatios.Add((name, area > 0 ? regionDefect * 100.0 / area : 0.0));
         }
-        else
+
+        // 最终安全边界：推理先走 ROI 外接矩形以适配模型输入，结果回写后再用修正后的精确 ROI
+        // 做一次全图裁剪，防止旋转 ROI 或多个检测项合并时任何像素泄漏到 ROI 外。
+        using (var allowedMask = new Mat(img.Size(), MatType.CV_8UC1, Scalar.All(0)))
         {
             for (var ri = 0; ri < rois.Count; ri++)
             {
-                var (name, rect) = rois[ri];
-                var meta = ri < metas.Count ? metas[ri] : new RoiMeta();
-                var (cx, cy, w, h, angle) = rect.ToPixels(img.Width, img.Height);
-                var cropRect = YoloNode.ComputeRoiCropRect((int)cx, (int)cy, w, h, angle, img.Width, img.Height);
-                cropRects.Add(cropRect);
-                if (!meta.Enabled)
-                {
-                    roiActive.Add(false);
-                    roiHasDefect.Add(false);
-                    regionRatios.Add((name, -1)); // 停用：不检测
-                    continue;
-                }
-                roiActive.Add(true);
-                var regionDefect = SegmentRegion(normalized, cropRect, roiClassMap[ri], defectMask, classMap);
-                roiHasDefect.Add(regionDefect > 0);
-                defectPixels += regionDefect;
-                var area = (long)cropRect.Width * cropRect.Height;
-                regionRatios.Add((name, area > 0 ? regionDefect * 100.0 / area : 0.0));
+                if (ri >= metas.Count || !metas[ri].Enabled) continue;
+                using var roiMask = NodeRois.CreateMask(rois[ri].Rect, img.Width, img.Height);
+                Cv2.BitwiseOr(allowedMask, roiMask, allowedMask);
             }
+            Cv2.BitwiseAnd(defectMask, allowedMask, defectMask);
+            Cv2.BitwiseAnd(classMap, allowedMask, classMap);
         }
 
         // 总范围过滤：缺陷掩码与类别图 AND 总范围；范围外 ROI 占比按过滤后掩码重算
@@ -265,9 +286,6 @@ public sealed class SemanticSegNode : IModelNode
 
         // 切图：缺陷区连通域裁剪保存（检测项级「是否存图」过滤）；目录未配置时记日志
         SaveDefectCrops(img, defectMask, classMap, rois, metas, decision);
-
-        // 整图留存：按本节点判定把原图存到 crop_dir\OK|NG（save_mode = all/ok/ng）
-        SaveWholeImage(img, decision);
 
         var nodeResult = new NodeResult
         {
@@ -555,9 +573,20 @@ public sealed class SemanticSegNode : IModelNode
     /// </summary>
     private (List<(string Name, RoiRect Rect)> Rois, List<RoiMeta> Metas) ResolveRoisFull(Mat img, PipelineRunContext ctx)
     {
-        var items = NodeRois.ParseOwnFull(_params.GetValueOrDefault("own_rois"));
+        var raw = _params.GetValueOrDefault("own_rois");
+        var items = NodeRois.ParseOwnFull(raw);
+        if (!string.IsNullOrWhiteSpace(raw) && items.Count == 0)
+        {
+            Log?.Invoke($"[ROI] {Name}: own_rois 非空但没有解析出有效检测项，原始值={raw}");
+        }
         var rois = NodeRois.ApplyPoseCorrection(
             items.Select(i => (i.Name, i.Rect)).ToList(), Name, img.Width, img.Height, ctx.PoseCorrection);
+        var coordinates = string.Join(",", rois.Select(r =>
+        {
+            var (cx, cy, w, h, angle) = r.Rect.ToPixels(img.Width, img.Height);
+            return $"{r.Name}({cx:F1},{cy:F1},{w:F1}x{h:F1},{angle:F1}°)";
+        }));
+        Log?.Invoke($"[ROI] {Name}: 运行时检测项数量={rois.Count}，修正后坐标={coordinates}");
         return (rois, items.Select(i => i.Meta).ToList());
     }
 
@@ -626,11 +655,12 @@ public sealed class SemanticSegNode : IModelNode
         return shapes;
     }
 
-    /// <summary>缺陷区切图：crop_dir\OK|NG\时间戳_类别_序号.jpg + sidecar（类别/像素数/框/ROI 名/时间）。类别取连通域多数像素。</summary>
+    /// <summary>缺陷区切图：有检测项时保存用户 ROI；无检测项时回退为缺陷连通域切图。</summary>
     private void SaveDefectCrops(
         Mat img, Mat defectMask, Mat classMap,
         List<(string Name, RoiRect Rect)> rois, List<RoiMeta> metas, string decision)
     {
+        if (!SaveImageNode.ShouldSave(_params.GetValueOrDefault("save_mode"), decision)) return;
         var dir = _params.GetValueOrDefault("crop_dir");
         if (string.IsNullOrWhiteSpace(dir))
         {
@@ -640,103 +670,68 @@ public sealed class SemanticSegNode : IModelNode
             }
             return;
         }
-        var sub = decision == "NG" ? "NG" : "OK";
-        var ts = DateTime.Now.ToString("yyyyMMdd_HHmmss_fff");
-        classMap.GetArray(out byte[]? classBuf);
-
-        Cv2.FindContours(defectMask, out var contours, out _, RetrievalModes.External, ContourApproximationModes.ApproxSimple);
-        var idx = 0;
-        foreach (var contour in contours)
+        if (rois.Count > 0)
         {
-            if (Cv2.ContourArea(contour) < 1) continue;
-            try
-            {
-                var raw = Cv2.BoundingRect(contour);
-                var box = ClampRect(raw.X, raw.Y, raw.Width, raw.Height, img.Width, img.Height);
-                using var crop = new Mat(img, box).Clone();
-
-                // 类别：连通域内多数像素
-                var cls = "缺陷";
-                long pixels = 0;
-                if (classBuf != null)
-                {
-                    var counts = new Dictionary<byte, int>();
-                    for (var y = box.Y; y < box.Y + box.Height && y < classMap.Rows; y++)
-                    {
-                        for (var x = box.X; x < box.X + box.Width && x < classMap.Cols; x++)
-                        {
-                            var v = classBuf[y * classMap.Cols + x];
-                            if (v > 0) counts[v] = counts.GetValueOrDefault(v) + 1;
-                        }
-                    }
-                    var best = counts.OrderByDescending(kv => kv.Value).FirstOrDefault();
-                    if (best.Key > 0)
-                    {
-                        cls = ClassName(best.Key - 1);
-                        pixels = best.Value;
-                    }
-                }
-
-                // 检测项级存图过滤：连通域中心落在哪个检测项内，按该项「是否存图」；不在任何项内默认存
-                var save = true;
-                var roiName = "";
-                for (var ri = 0; ri < rois.Count && ri < metas.Count; ri++)
-                {
-                    if (NodeRois.ContainsPixel(rois[ri].Rect, box.X + box.Width / 2.0, box.Y + box.Height / 2.0, img.Width, img.Height))
-                    {
-                        roiName = rois[ri].Name;
-                        save = metas[ri].SaveImage;
-                        break;
-                    }
-                }
-                if (!save) continue;
-
-                var full = Path.GetFullPath(Path.Combine(dir, sub));
-                Directory.CreateDirectory(full);
-                var outPath = Path.Combine(full, $"{ts}_{cls}_{idx++}.jpg");
-                Cv2.ImWrite(outPath, crop);
-                File.WriteAllText(outPath + ".json", System.Text.Json.JsonSerializer.Serialize(new
-                {
-                    @class = cls,
-                    pixels,
-                    box = new[] { box.X, box.Y, box.Width, box.Height },
-                    roi_name = roiName,
-                    triggered = true,
-                    created_at = DateTime.Now.ToString("yyyy-MM-ddTHH:mm:ss.fff"),
-                }));
-                Log?.Invoke($"[切图] {Name}: 已保存 {sub} 缺陷区切图 {cls}({pixels}px) -> {outPath}");
-            }
-            catch (Exception ex)
-            {
-                Log?.Invoke($"[切图] {Name}: 保存失败: {ex.Message}");
-            }
-        }
-    }
-
-    /// <summary>整图留存：按本节点判定把原图存到 crop_dir\OK|NG（save_mode = all/ok/ng）。失败只记日志不中断。</summary>
-    private void SaveWholeImage(Mat img, string decision)
-    {
-        if (!SaveImageNode.ShouldSave(_params.GetValueOrDefault("save_mode"), decision)) return;
-        var dir = _params.GetValueOrDefault("crop_dir");
-        if (string.IsNullOrWhiteSpace(dir))
-        {
-            Log?.Invoke($"[整图] {Name}: 整图保存已启用(保存类型={_params.GetValueOrDefault("save_mode")})但未配置「缺陷区切图保存目录」(crop_dir)，本次不保存");
+            Log?.Invoke($"[切图] {Name}: 进入检测项 ROI 保存分支，ROI数量={rois.Count}");
+            SaveRoiCrops(img, defectMask, rois, metas, decision, dir);
             return;
         }
-        try
+        return;
+    }
+
+    /// <summary>检测项 ROI 切图：保存用户绘制的检测区域，而不是缺陷像素连通域外接框。</summary>
+    private void SaveRoiCrops(
+        Mat img, Mat defectMask,
+        List<(string Name, RoiRect Rect)> rois, List<RoiMeta> metas,
+        string decision, string dir)
+    {
+        var sub = decision == "NG" ? "NG" : "OK";
+        var full = Path.GetFullPath(Path.Combine(dir, sub));
+        Directory.CreateDirectory(full);
+        var timestamp = DateTime.Now.ToString("yyyyMMdd_HHmmss_fff");
+        var saved = 0;
+        for (var ri = 0; ri < rois.Count && ri < metas.Count; ri++)
         {
-            var sub = decision == "NG" ? "NG" : "OK";
-            var full = Path.GetFullPath(Path.Combine(dir, sub));
-            Directory.CreateDirectory(full);
-            var outPath = Path.Combine(full, $"{DateTime.Now:yyyyMMdd_HHmmss_fff}_{Name}.jpg");
-            Cv2.ImWrite(outPath, img);
-            Log?.Invoke($"[整图] {Name}: 已保存 {sub} 整图 -> {outPath}");
+            var meta = metas[ri];
+            if (!meta.Enabled || !meta.SaveImage) continue;
+
+            var (cx, cy, w, h, angle) = rois[ri].Rect.ToPixels(img.Width, img.Height);
+            var box = YoloNode.ComputeRoiCropRect((int)cx, (int)cy, w, h, angle, img.Width, img.Height);
+            if (box.Width <= 0 || box.Height <= 0) continue;
+            using var crop = new Mat(img, box).Clone();
+            using var preciseMask = NodeRois.CreateMask(rois[ri].Rect, img.Width, img.Height);
+            using var preciseCrop = new Mat(preciseMask, box);
+            using var defectCrop = new Mat(defectMask, box);
+            Cv2.BitwiseAnd(defectCrop, preciseCrop, defectCrop);
+            var defectPixels = Cv2.CountNonZero(defectCrop);
+            var roiName = string.IsNullOrWhiteSpace(rois[ri].Name) ? $"ROI{ri + 1}" : rois[ri].Name;
+            var outPath = Path.Combine(full,
+                $"{timestamp}_{SafeFileText(Name)}_{SafeFileText(roiName)}_{ri + 1}.jpg");
+            if (!Cv2.ImWrite(outPath, crop))
+            {
+                Log?.Invoke($"[切图] {Name}: 检测项「{roiName}」图像编码失败: {outPath}");
+                continue;
+            }
+
+            File.WriteAllText(outPath + ".json", System.Text.Json.JsonSerializer.Serialize(new
+            {
+                box = new[] { box.X, box.Y, box.Width, box.Height },
+                roi_name = roiName,
+                defect_pixels = defectPixels,
+                triggered = defectPixels > 0,
+                created_at = DateTime.Now.ToString("yyyy-MM-ddTHH:mm:ss.fff"),
+            }));
+            saved++;
+            Log?.Invoke($"[切图] {Name}: 已保存 {sub} 检测项ROI切图「{roiName}」 -> {outPath}");
         }
-        catch (Exception ex)
+        if (saved == 0)
         {
-            Log?.Invoke($"[整图] {Name}: 整图保存失败: {ex.Message}");
+            Log?.Invoke($"[切图] {Name}: 没有启用且允许存图的检测项 ROI");
         }
     }
+
+    private static string SafeFileText(string text) =>
+        string.Join("_", text.Split(Path.GetInvalidFileNameChars(), StringSplitOptions.RemoveEmptyEntries));
 
     /// <summary>矩形钳制到图像内（永不抛异常；最小 1×1）。</summary>
     private static Rect ClampRect(int x, int y, int w, int h, int maxW, int maxH)

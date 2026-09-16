@@ -1,7 +1,7 @@
 using System.IO;
 using System.Text.Json;
 
-namespace SpeakerVisionInspection.Detection;
+namespace VisionInspection.Detection;
 
 /// <summary>单层轮廓点：相对基准点的坐标（该层像素系）+ 归一化梯度方向 (Dx,Dy)。</summary>
 public readonly record struct TemplatePoint(float X, float Y, float Dx, float Dy);

@@ -4,9 +4,9 @@ using System.Text.Json;
 using Microsoft.ML.OnnxRuntime;
 using Microsoft.ML.OnnxRuntime.Tensors;
 using OpenCvSharp;
-using SpeakerVisionInspection.Models;
+using VisionInspection.Models;
 
-namespace SpeakerVisionInspection.Detection;
+namespace VisionInspection.Detection;
 
 /// <summary>
 /// PatchCore 推理运行时：ONNX 特征提取 + kNN 打分（复现 Python: torch.cdist(p=2) -> topk(k) -> mean -> max）。

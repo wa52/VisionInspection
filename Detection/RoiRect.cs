@@ -1,6 +1,6 @@
 using System.Globalization;
 
-namespace SpeakerVisionInspection.Detection;
+namespace VisionInspection.Detection;
 
 /// <summary>
 /// 归一化 ROI（中心点 + 宽高 + 旋转角，0~1 相对坐标，抗图像分辨率变化）。
@@ -102,7 +102,7 @@ public readonly record struct RoiRect(double CenterX, double CenterY, double W, 
     }
 }
 
-/// <summary>ROI 拖拽命中部位（8 手柄 + 主体移动 + 旋转柄）。</summary>
+/// <summary>ROI 拖拽命中部位（8 手柄 + 主体移动 + 旋转柄 + 圆环内外半径柄）。</summary>
 public enum RoiHandle
 {
     None,
@@ -116,6 +116,8 @@ public enum RoiHandle
     BottomLeft,
     Left,
     Rotate,
+    RingOuter,
+    RingInner,
 }
 
 /// <summary>

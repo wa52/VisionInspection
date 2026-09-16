@@ -3,10 +3,10 @@ using System.Text;
 using Microsoft.ML.OnnxRuntime;
 using Microsoft.ML.OnnxRuntime.Tensors;
 using OpenCvSharp;
-using SpeakerVisionInspection.Models;
-using SpeakerVisionInspection.Services;
+using VisionInspection.Models;
+using VisionInspection.Services;
 
-namespace SpeakerVisionInspection.Detection;
+namespace VisionInspection.Detection;
 
 /// <summary>
 /// YOLO 目标检测节点（Ultralytics yolo11 标准导出 ONNX）。
@@ -24,7 +24,7 @@ public sealed class YoloNode : IModelNode
         new ParamDef { Key = "source", Label = "图像来源", Kind = "nodesource", Default = "@input" },
         new ParamDef { Key = "decision_mode", Label = "判定模式", Kind = "choice", Default = DecisionDetectNg, Choices = [DecisionDetectNg, DecisionMissingNg] },
         new ParamDef { Key = "crop_dir", Label = "检测框切图保存目录(可选·按OK/NG分目录)", Kind = "folder", Default = "" },
-        new ParamDef { Key = "save_mode", Label = "整图保存", Kind = "choice", Default = "全部", Choices = ["全部", "仅OK", "仅NG"] },
+        new ParamDef { Key = "save_mode", Label = "检测框切图保存类型", Kind = "choice", Default = "全部", Choices = ["全部", "仅OK", "仅NG", "不保存"] },
         new ParamDef { Key = "scope_index", Label = "总范围ROI索引(检测项管理设置)", Kind = "hidden", Default = "-1" },
     ];
 
@@ -159,9 +159,15 @@ public sealed class YoloNode : IModelNode
             throw new InvalidOperationException($"节点 {Name}: 输入图像为空（单次/连续执行请把「图像来源」指向图像源节点）");
         }
 
-        // ROI 解析：节点私有 own_rois（含检测项元数据）+ 位置修正；空 = 全图检测。
+        // ROI 解析：节点私有 own_rois（含检测项元数据）+ 位置修正；必须配置检测项 ROI。
         // 检测项名 ↔ 模型类名匹配：名字命中的检测项只判该类；未命中/无检测项按全部类别判定（不再使用「关注类别」参数）
         var (rois, metas) = ResolveRoisFull(img, ctx);
+        if (rois.Count == 0)
+        {
+            const string error = "未解析到有效检测项 ROI，已停止目标检测（请在本节点「检测项管理」中添加并启用检测项 ROI）";
+            Log?.Invoke($"[ROI] {Name}: {error}");
+            return new NodeResult { Decision = "ERROR", Error = error, OutputImage = img.Clone() };
+        }
         var roiClassMap = new List<IReadOnlyList<string>>(rois.Count);
         foreach (var (name, _) in rois)
         {
@@ -177,31 +183,27 @@ public sealed class YoloNode : IModelNode
         var detRoiIdx = new List<int>(); // 与 detections 平行：每个检出来自哪个 ROI（总范围过滤/观察/存图判定用）
         using var normalized = Normalize3ch(img);
 
-        if (rois.Count == 0)
+        for (var ri = 0; ri < rois.Count; ri++)
         {
-            detections.AddRange(Detect(normalized, float.Parse(DefaultConf, System.Globalization.CultureInfo.InvariantCulture)));
-        }
-        else
-        {
-            for (var ri = 0; ri < rois.Count; ri++)
+            var (name, rect) = rois[ri];
+            var meta = ri < metas.Count ? metas[ri] : new RoiMeta();
+            if (!meta.Enabled)
             {
-                var (name, rect) = rois[ri];
-                var meta = ri < metas.Count ? metas[ri] : new RoiMeta();
-                if (!meta.Enabled)
-                {
-                    perRoiCounts.Add((name, -1)); // 停用：不检测，输出 roi_名称=停用
-                    continue;
-                }
-                // 裁剪矩形只算一次，Detect 与坐标偏移共用，保证框映射一致；conf=检测项级阈值
-                var (cx, cy, w, h, angle) = rect.ToPixels(img.Width, img.Height);
-                var cropRect = ComputeRoiCropRect((int)cx, (int)cy, w, h, angle, img.Width, img.Height);
-                using var cropView = new Mat(normalized, cropRect);
-                var roiConf = (float)(meta.ThresholdValue ?? double.Parse(DefaultConf, System.Globalization.CultureInfo.InvariantCulture));
-                var dets = Detect(cropView, roiConf).Select(d => d with { Cx = d.Cx + cropRect.X, Cy = d.Cy + cropRect.Y }).ToList();
-                detections.AddRange(dets);
-                detRoiIdx.AddRange(Enumerable.Repeat(ri, dets.Count));
-                perRoiCounts.Add((name, dets.Count(d => PositiveClasses.MatchesRoi(roiClassMap[ri], d.Class))));
+                perRoiCounts.Add((name, -1)); // 停用：不检测，输出 roi_名称=停用
+                continue;
             }
+            // 裁剪矩形只算一次，Detect 与坐标偏移共用，保证框映射一致；conf=检测项级阈值
+            var (cx, cy, w, h, angle) = rect.ToPixels(img.Width, img.Height);
+            var cropRect = ComputeRoiCropRect((int)cx, (int)cy, w, h, angle, img.Width, img.Height);
+            using var cropView = new Mat(normalized, cropRect);
+            var roiConf = (float)(meta.ThresholdValue ?? double.Parse(DefaultConf, System.Globalization.CultureInfo.InvariantCulture));
+            var dets = Detect(cropView, roiConf)
+                .Select(d => d with { Cx = d.Cx + cropRect.X, Cy = d.Cy + cropRect.Y })
+                .Where(d => NodeRois.ContainsPixel(rect, d.Cx, d.Cy, img.Width, img.Height))
+                .ToList();
+            detections.AddRange(dets);
+            detRoiIdx.AddRange(Enumerable.Repeat(ri, dets.Count));
+            perRoiCounts.Add((name, dets.Count(d => PositiveClasses.MatchesRoi(roiClassMap[ri], d.Class))));
         }
 
         // 总范围约束：scope_index 指向的 ROI 为总范围，其余 ROI 的检出只保留中心落在总范围内的
@@ -234,9 +236,6 @@ public sealed class YoloNode : IModelNode
 
         // 切图：每个检测框裁剪保存（按判定分目录；检测项级「是否存图」过滤）；目录未配置时记日志
         SaveDetections(img, detections, triggered, decision, detRoiIdx, metas);
-
-        // 整图留存：按本节点判定把原图存到 crop_dir\OK|NG（save_mode = all/ok/ng）
-        SaveWholeImage(img, decision);
 
         var nodeResult = new NodeResult
         {
@@ -468,6 +467,7 @@ public sealed class YoloNode : IModelNode
         Mat img, List<YoloDetection> detections, List<YoloDetection> triggered, string decision,
         List<int> detRoiIdx, List<RoiMeta> metas)
     {
+        if (!SaveImageNode.ShouldSave(_params.GetValueOrDefault("save_mode"), decision)) return;
         var dir = _params.GetValueOrDefault("crop_dir");
         if (string.IsNullOrWhiteSpace(dir))
         {
@@ -516,31 +516,6 @@ public sealed class YoloNode : IModelNode
             {
                 Log?.Invoke($"[切图] {Name}: 保存失败: {ex.Message}");
             }
-        }
-    }
-
-    /// <summary>整图留存：按本节点判定把原图存到 crop_dir\OK|NG（save_mode = all/ok/ng）。失败只记日志不中断。</summary>
-    private void SaveWholeImage(Mat img, string decision)
-    {
-        if (!SaveImageNode.ShouldSave(_params.GetValueOrDefault("save_mode"), decision)) return;
-        var dir = _params.GetValueOrDefault("crop_dir");
-        if (string.IsNullOrWhiteSpace(dir))
-        {
-            Log?.Invoke($"[整图] {Name}: 整图保存已启用(保存类型={_params.GetValueOrDefault("save_mode")})但未配置「检测框切图保存目录」(crop_dir)，本次不保存");
-            return;
-        }
-        try
-        {
-            var sub = decision == "NG" ? "NG" : "OK";
-            var full = Path.GetFullPath(Path.Combine(dir, sub));
-            Directory.CreateDirectory(full);
-            var outPath = Path.Combine(full, $"{DateTime.Now:yyyyMMdd_HHmmss_fff}_{Name}.jpg");
-            Cv2.ImWrite(outPath, img);
-            Log?.Invoke($"[整图] {Name}: 已保存 {sub} 整图 -> {outPath}");
-        }
-        catch (Exception ex)
-        {
-            Log?.Invoke($"[整图] {Name}: 整图保存失败: {ex.Message}");
         }
     }
 

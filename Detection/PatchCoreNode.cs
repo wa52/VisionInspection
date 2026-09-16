@@ -1,9 +1,9 @@
 using System.IO;
 using OpenCvSharp;
-using SpeakerVisionInspection.Models;
-using SpeakerVisionInspection.Services;
+using VisionInspection.Models;
+using VisionInspection.Services;
 
-namespace SpeakerVisionInspection.Detection;
+namespace VisionInspection.Detection;
 
 /// <summary>PatchCore 模型节点：包装 PatchCoreRuntime + 预处理。threshold 为节点参数（空则用模型自带阈值）。
 /// 支持单个归一化 ROI：只把 ROI 区域喂给模型检测；展示图像可选热力图/检测图；可按判定保存 ROI 切图。</summary>

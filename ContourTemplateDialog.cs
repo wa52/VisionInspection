@@ -7,12 +7,12 @@ using System.Windows.Media.Imaging;
 using System.Windows.Shapes;
 using Microsoft.Win32;
 using OpenCvSharp;
-using SpeakerVisionInspection.Detection;
-using SpeakerVisionInspection.Models;
+using VisionInspection.Detection;
+using VisionInspection.Models;
 using WpfPoint = System.Windows.Point;
 using WpfRect = System.Windows.Rect;
 
-namespace SpeakerVisionInspection;
+namespace VisionInspection;
 
 /// <summary>
 /// 轮廓模板建模弹窗（独立于主图像区）：
@@ -75,6 +75,7 @@ public sealed class ContourTemplateDialog : System.Windows.Window
     private WpfPoint? _ref;
     private WpfPoint? _dragStart;
     private ShapeTemplate? _preview;
+    private bool _previewDirty;
 
     public ContourTemplateDialog(MainWindow main, RecipeNode node, NodeParamDialog? hostDialog)
     {
@@ -159,7 +160,7 @@ public sealed class ContourTemplateDialog : System.Windows.Window
         var paramRow = new StackPanel { Orientation = Orientation.Horizontal, Margin = new Thickness(0, 6, 0, 0) };
         paramRow.Children.Add(new TextBlock { Text = "滤波Sigma:", VerticalAlignment = VerticalAlignment.Center, Margin = new Thickness(0, 0, 4, 0) });
         paramRow.Children.Add(_sigmaBox);
-        paramRow.Children.Add(new TextBlock { Text = "边缘阈值:", VerticalAlignment = VerticalAlignment.Center, Margin = new Thickness(10, 0, 4, 0) });
+        paramRow.Children.Add(new TextBlock { Text = "建模边缘阈值:", VerticalAlignment = VerticalAlignment.Center, Margin = new Thickness(10, 0, 4, 0) });
         paramRow.Children.Add(_contrastBox);
         paramRow.Children.Add(new TextBlock { Text = "金字塔层数(0=自动):", VerticalAlignment = VerticalAlignment.Center, Margin = new Thickness(10, 0, 4, 0) });
         paramRow.Children.Add(_levelsBox);
@@ -168,6 +169,10 @@ public sealed class ContourTemplateDialog : System.Windows.Window
         paramRow.Children.Add(new Button { Content = "提取预览", Width = 84, Height = 24, Margin = new Thickness(12, 0, 0, 0) }
             .Apply(b => b.Click += (_, _) => ExtractPreview()));
         panel.Children.Add(paramRow);
+
+        _sigmaBox.TextChanged += (_, _) => _previewDirty = true;
+        _contrastBox.TextChanged += (_, _) => _previewDirty = true;
+        _levelsBox.TextChanged += (_, _) => _previewDirty = true;
 
         var dirRow = new StackPanel { Orientation = Orientation.Horizontal, Margin = new Thickness(0, 8, 0, 0) };
         dirRow.Children.Add(new TextBlock { Text = "模板目录(自动,可改):", VerticalAlignment = VerticalAlignment.Center, Margin = new Thickness(0, 0, 6, 0) });
@@ -223,7 +228,7 @@ public sealed class ContourTemplateDialog : System.Windows.Window
             var sourcePath = System.IO.Path.Combine(dir, "source_image.png");
             if (!File.Exists(sourcePath))
             {
-                SetStatus($"找到现有模板（滤波Sigma={template.Sigma:0.###}/边缘阈值={template.MinContrast:0.###} 已回填），但无来源图存档——请重新选同一张模板图后提取");
+                SetStatus($"找到现有模板（滤波Sigma={template.Sigma:0.###}/建模边缘阈值={template.MinContrast:0.###} 已回填），但无来源图存档——请重新选同一张模板图后提取");
                 return;
             }
             var mat = Cv2.ImDecode(File.ReadAllBytes(sourcePath), ImreadModes.Color);
@@ -240,6 +245,7 @@ public sealed class ContourTemplateDialog : System.Windows.Window
             }
             _ref = new WpfPoint(template.RoiX + template.ReferenceX, template.RoiY + template.ReferenceY);
             _preview = template;
+            _previewDirty = false;
             ClearEraseTrails();
             ComputeViewTransform();
             Redraw();
@@ -504,10 +510,11 @@ public sealed class ContourTemplateDialog : System.Windows.Window
         {
             PushUndo();
             _preview = BuildTemplate();
+            _previewDirty = false;
             ClearEraseTrails();
             var perLevel = string.Join("/", _preview.LevelPoints.Select(l => l.Count));
             Redraw();
-            SetStatus($"提取完成：各层点数 {perLevel}。可切「擦除点」抹掉问题边缘，确认后点「保存模板」。");
+            SetStatus($"提取完成：各层点数 {perLevel}。{DescribeTemplateQuality(_preview)}可切「擦除点」抹掉问题边缘，确认后点「保存模板」。");
         }
         catch (Exception ex)
         {
@@ -641,6 +648,10 @@ public sealed class ContourTemplateDialog : System.Windows.Window
     {
         var roi = _roi!.Value;
         var refAbs = _ref!.Value;
+        if (!roi.Contains(refAbs))
+        {
+            throw new ArgumentException("基准点必须位于模板区域内");
+        }
         using var gray = new Mat();
         Cv2.CvtColor(_image!, gray, ColorConversionCodes.BGR2GRAY);
         var x = Math.Clamp((int)roi.X, 0, gray.Width - 2);
@@ -660,6 +671,31 @@ public sealed class ContourTemplateDialog : System.Windows.Window
         return template;
     }
 
+    private static string DescribeTemplateQuality(ShapeTemplate template)
+    {
+        var points = template.LevelPoints.FirstOrDefault() ?? [];
+        var cells = new HashSet<(int X, int Y)>();
+        var width = Math.Max(1, template.RoiW);
+        var height = Math.Max(1, template.RoiH);
+        foreach (var point in points)
+        {
+            var x = Math.Clamp((int)Math.Floor((point.X + template.ReferenceX) / width * 4), 0, 3);
+            var y = Math.Clamp((int)Math.Floor((point.Y + template.ReferenceY) / height * 4), 0, 3);
+            cells.Add((x, y));
+        }
+
+        var coverage = cells.Count / 16.0;
+        if (points.Count < 30)
+        {
+            return $"质量警告：有效点仅 {points.Count} 个，建议降低建模边缘阈值。";
+        }
+        if (coverage < 0.25)
+        {
+            return $"质量警告：模板空间覆盖率 {coverage:P0}，建议扩大 ROI 或重新选取图像。";
+        }
+        return $"质量：有效点 {points.Count} 个，空间覆盖率 {coverage:P0}。";
+    }
+
     private void SaveTemplate()
     {
         var dir = _dirBox.Text.Trim();
@@ -670,8 +706,14 @@ public sealed class ContourTemplateDialog : System.Windows.Window
         }
         try
         {
-            var template = _preview ?? BuildTemplate();
+            var template = _preview is null || _previewDirty ? BuildTemplate() : _preview;
+            if (template.LevelPoints.Count == 0 || template.LevelPoints.All(l => l.Count == 0))
+            {
+                throw new InvalidDataException("模板没有有效轮廓点，请降低建模边缘阈值或重新框选区域");
+            }
             template.Save(dir);
+            // 立即回读，避免目录可写但生成文件不可用时误报保存成功。
+            _ = ShapeTemplate.Load(dir);
             // 来源图存档：下次打开弹窗自动回填（调参数即可重建模）；纯 .NET PNG 编码兼容中文路径
             if (_image is not null)
             {
@@ -684,6 +726,8 @@ public sealed class ContourTemplateDialog : System.Windows.Window
             }
             _node.Params["model_dir"] = dir;
             _main.HotApplyParam(_node, "model_dir", dir);
+            _preview = template;
+            _previewDirty = false;
             _main.LogUi($"[轮廓匹配] 节点 {_node.Name}: 模板已保存 → {dir}（{template.LevelPoints.FirstOrDefault()?.Count ?? 0} 点/{template.Levels} 层），基准点 ({template.ReferenceX:F0},{template.ReferenceY:F0})");
             _hostDialog?.NotifyRoiChanged();
             SetStatus("模板已保存，节点参数「模板目录」已更新");

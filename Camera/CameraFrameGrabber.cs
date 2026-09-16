@@ -1,8 +1,8 @@
 using System.Runtime.InteropServices;
 using OpenCvSharp;
-using SpeakerVisionInspection.Production;
+using VisionInspection.Production;
 
-namespace SpeakerVisionInspection.Camera;
+namespace VisionInspection.Camera;
 
 /// <summary>
 /// 同步取一帧相机图像（供图像源节点在单次/连续执行时抓帧）。

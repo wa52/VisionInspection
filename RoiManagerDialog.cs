@@ -5,10 +5,10 @@ using System.Windows.Controls;
 using System.Windows.Controls.Primitives;
 using System.Windows.Data;
 using System.Windows.Media;
-using SpeakerVisionInspection.Detection;
-using SpeakerVisionInspection.Models;
+using VisionInspection.Detection;
+using VisionInspection.Models;
 
-namespace SpeakerVisionInspection;
+namespace VisionInspection;
 
 /// <summary>
 /// 检测项管理弹窗（表格化）：一行一个检测项，名称/启用/判断/阈值/存图/总范围直接在单元格编辑，
@@ -40,6 +40,10 @@ public sealed class RoiManagerDialog : Window
 
 		private bool _saveImage;
 		public bool SaveImage { get => _saveImage; set => Set(ref _saveImage, value); }
+
+		/// <summary>目标字符（期望文本，仅字符识别节点显示；空 = 不做文本比对只按置信度判定）。</summary>
+		private string _target = "";
+		public string Target { get => _target; set => Set(ref _target, value); }
 
 		private bool _scope;
 		public bool Scope { get => _scope; set => Set(ref _scope, value); }
@@ -124,7 +128,9 @@ public sealed class RoiManagerDialog : Window
 
 		_hint = new TextBlock
 		{
-			Text = "提示：表格里直接改名称/启用/判断/阈值/存图；「总范围」勾选后其余检测项只保留落在范围内的结果。主图像区点框选中（第一下只选中，再按住拖动），右键删除。",
+			Text = _hostNode.Type == "CharRec"
+				? "提示：表格里直接改名称/启用/判断/阈值/存图/目标字符（期望文本，空=只按置信度判定）；「总范围」勾选后其余检测项只保留落在范围内的字符。主图像区点框选中（第一下只选中，再按住拖动），右键删除。"
+				: "提示：表格里直接改名称/启用/判断/阈值/存图；「总范围」勾选后其余检测项只保留落在范围内的结果。主图像区点框选中（第一下只选中，再按住拖动），右键删除。",
 			TextWrapping = TextWrapping.Wrap,
 			Foreground = (Brush)Application.Current.Resources["MutedTextBrush"],
 			FontSize = 11,
@@ -216,6 +222,11 @@ public sealed class RoiManagerDialog : Window
 		grid.Columns.Add(TextColumn("阈值", nameof(RoiRow.Threshold), 64));
 		// 存图
 		grid.Columns.Add(CheckColumn("存图", 52, nameof(RoiRow.SaveImage)));
+		// 目标字符（仅字符识别节点：期望文本，用于等于/包含比对）
+		if (_hostNode.Type == "CharRec")
+		{
+			grid.Columns.Add(TextColumn("目标字符", nameof(RoiRow.Target), 90));
+		}
 		// 总范围
 		grid.Columns.Add(CheckColumn("总范围", 60, nameof(RoiRow.Scope)));
 		return grid;
@@ -278,6 +289,7 @@ public sealed class RoiManagerDialog : Window
 			case nameof(RoiRow.Enabled):
 			case nameof(RoiRow.SaveImage):
 			case nameof(RoiRow.JudgeIndex):
+			case nameof(RoiRow.Target):
 				// 行内值即最新状态，绑定已同步显示，无需重建整表
 				WriteMeta(row);
 				break;
@@ -315,7 +327,8 @@ public sealed class RoiManagerDialog : Window
 			Enabled: row.Enabled,
 			Judge: row.JudgeIndex == 1 ? "仅观察" : "",
 			Threshold: row.Threshold.Trim(),
-			SaveImage: row.SaveImage));
+			SaveImage: row.SaveImage,
+			Target: row.Target.Trim()));
 	}
 
 	/// <summary>非法输入回滚单元格显示：从节点当前 own_rois 取回旧值写回行属性（_reverting 防再触发）。</summary>
@@ -363,6 +376,7 @@ public sealed class RoiManagerDialog : Window
 					JudgeIndex = string.Equals(it.Meta.Judge, "仅观察", StringComparison.Ordinal) ? 1 : 0,
 					Threshold = it.Meta.Threshold,
 					SaveImage = it.Meta.SaveImage,
+					Target = it.Meta.Target,
 					Scope = scope == i,
 				};
 				row.PropertyChanged += Row_PropertyChanged;

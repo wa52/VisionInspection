@@ -1,4 +1,4 @@
-namespace SpeakerVisionInspection.Camera;
+namespace VisionInspection.Camera;
 
 /// <summary>相机信息（枚举结果）。</summary>
 public sealed record CameraInfo(
