@@ -509,8 +509,8 @@
     </Style>
 
     <Style TargetType="TextBox" x:Key="LogBox" BasedOn="{StaticResource {x:Type TextBox}}">
-        <Setter Property="Background" Value="{StaticResource ViewportBrush}" />
-        <Setter Property="Foreground" Value="#44505E" />
+        <Setter Property="Background" Value="{StaticResource PanelBrush}" />
+        <Setter Property="Foreground" Value="{StaticResource TextBrush}" />
         <Setter Property="BorderThickness" Value="0" />
         <Setter Property="IsReadOnly" Value="True" />
         <Setter Property="FontFamily" Value="Cascadia Mono, Consolas" />
