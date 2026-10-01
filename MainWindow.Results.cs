@@ -379,6 +379,7 @@ public partial class MainWindow
 			RunContinuousIcon.Data = Geometry.Parse(IconStopData);
 			BtnRunContinuous.Background = (Brush)FindResource("NgSoftBrush");
 			BtnRunContinuous.BorderBrush = (Brush)FindResource("NgBrush");
+			BtnRunContinuous.Foreground = (Brush)FindResource("NgBrush");
 			BtnRunContinuous.IsEnabled = true;
 			BtnRunContinuous.ToolTip = "停止执行";
 		}
@@ -387,6 +388,7 @@ public partial class MainWindow
 			RunContinuousIcon.Data = Geometry.Parse(IconContinuousData);
 			BtnRunContinuous.Background = (Brush)FindResource("AccentBrush");
 			BtnRunContinuous.BorderBrush = (Brush)FindResource("AccentHoverBrush");
+			BtnRunContinuous.Foreground = Brushes.White;
 			BtnRunContinuous.IsEnabled = isEnabled;
 			BtnRunContinuous.ToolTip = "连续执行：循环执行检测流程（再次点击停止）";
 		}
