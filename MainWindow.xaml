@@ -30,7 +30,7 @@
             <Setter Property="Background" Value="{StaticResource SurfaceRaisedBrush}"/>
             <Setter Property="BorderBrush" Value="{StaticResource BorderBrush}"/>
             <Setter Property="BorderThickness" Value="1"/>
-            <Setter Property="CornerRadius" Value="13"/>
+            <Setter Property="CornerRadius" Value="4"/>
             <Setter Property="Padding" Value="9,4"/>
             <Setter Property="Margin" Value="6,0,0,0"/>
         </Style>
@@ -182,7 +182,7 @@
                 <StackPanel Grid.Column="6" Orientation="Horizontal" VerticalAlignment="Center">
                     <Button x:Name="BtnRunOnce" Style="{StaticResource SuccessButton}" Height="36" MinWidth="92" Margin="0,0,6,0"
                             Click="BtnRunOnce_Click" IsEnabled="False" ToolTip="单次执行：执行一遍检测流程">
-                        <TextBlock Text="▶  单次检测" Foreground="#DDFBE8"/>
+                        <TextBlock Text="▶  单次检测" Foreground="#166534"/>
                     </Button>
                     <Button x:Name="BtnRunContinuous" Style="{StaticResource PrimaryButton}" Height="36" MinWidth="102" Margin="0,0,10,0"
                             Click="BtnRunContinuous_Click" IsEnabled="False" ToolTip="连续执行：循环执行检测流程（再次点击停止）">
@@ -348,7 +348,7 @@
                         <Border HorizontalAlignment="Left" VerticalAlignment="Bottom" Margin="12" Padding="8,4"
                                 Background="#B30D141D" BorderBrush="{StaticResource BorderBrush}" BorderThickness="1" CornerRadius="5"
                                 IsHitTestVisible="False">
-                            <TextBlock Text="滚轮缩放  ·  拖动画面  ·  ROI 可视化叠加" Foreground="{StaticResource MutedTextBrush}" FontSize="10"/>
+                            <TextBlock Text="滚轮缩放  ·  拖动画面  ·  ROI 可视化叠加" Foreground="#CBD5E1" FontSize="10"/>
                         </Border>
                     </Grid>
 
