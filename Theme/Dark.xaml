@@ -47,7 +47,6 @@
         <Setter Property="Foreground" Value="{StaticResource SubtleTextBrush}" />
         <Setter Property="FontSize" Value="10" />
         <Setter Property="FontWeight" Value="SemiBold" />
-        <Setter Property="CharacterSpacing" Value="90" />
     </Style>
 
     <Style x:Key="SectionTitle" TargetType="TextBlock">
