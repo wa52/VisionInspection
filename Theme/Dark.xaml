@@ -507,7 +507,7 @@
         <Style.Triggers>
             <Trigger Property="IsSelected" Value="True">
                 <Setter Property="Background" Value="{StaticResource SelBrush}" />
-                <Setter Property="Foreground" Value="{StaticResource TextBrush}" />
+                <Setter Property="Foreground" Value="{StaticResource AccentHoverBrush}" />
             </Trigger>
         </Style.Triggers>
     </Style>
