@@ -171,7 +171,7 @@
                     <ToggleButton x:Name="BtnLock" Grid.Column="2" Width="34" Height="34" Padding="0" Margin="8,0,0,0"
                                   Click="BtnLock_Click"
                                   ToolTip="锁定方案：ROI 与节点结构不可修改（防误触；参数数值仍可调整）">
-                        <Path Stroke="{StaticResource TextBrush}" StrokeThickness="1.6"
+                        <Path Stroke="{Binding Foreground, RelativeSource={RelativeSource AncestorType=ToggleButton}}" StrokeThickness="1.6"
                               Data="M2,4 L22,4 L22,20 L2,20 Z M8,11 L16,11 L16,17 L8,17 Z M10,11 L10,9 A2,2 0 0 1 14,9 L14,11"
                               Width="17" Height="17" Stretch="Uniform"/>
                     </ToggleButton>
@@ -187,10 +187,10 @@
                     <Button x:Name="BtnRunContinuous" Style="{StaticResource PrimaryButton}" Height="36" MinWidth="102" Margin="0,0,10,0"
                             Click="BtnRunContinuous_Click" IsEnabled="False" ToolTip="连续执行：循环执行检测流程（再次点击停止）">
                         <StackPanel Orientation="Horizontal">
-                            <Path x:Name="RunContinuousIcon" Stroke="White" StrokeThickness="1.7"
+                            <Path x:Name="RunContinuousIcon" Stroke="{Binding Foreground, RelativeSource={RelativeSource AncestorType=Button}}" StrokeThickness="1.7"
                                   Data="M21,4 L21,10 L15,10 M19.6,15 A8,8 0 1 1 17.7,6.6 L21,10"
                                   Width="16" Height="16" Stretch="Uniform" Margin="0,0,7,0"/>
-                            <TextBlock Text="连续执行" Foreground="White"/>
+                            <TextBlock Text="连续执行" Foreground="{Binding Foreground, RelativeSource={RelativeSource AncestorType=Button}}"/>
                         </StackPanel>
                     </Button>
                     <Border Background="{StaticResource SurfaceRaisedBrush}" BorderBrush="{StaticResource BorderStrongBrush}" BorderThickness="1" CornerRadius="4" Padding="10,5" MinWidth="96">
@@ -326,7 +326,7 @@
                             </Button>
                             <ToggleButton x:Name="BtnThumbToggle" Width="30" Height="30" Padding="0" Margin="2,0"
                                           Click="BtnThumbToggle_Click" ToolTip="显示/隐藏节点缩略图">
-                                <Path Stroke="{StaticResource TextBrush}" StrokeThickness="1.6"
+                                <Path Stroke="{Binding Foreground, RelativeSource={RelativeSource AncestorType=ToggleButton}}" StrokeThickness="1.6"
                                       Data="M3,5 L21,5 L21,19 L3,19 Z M6,15 L10,11 L13,14 L16,11 L19,15"
                                       Width="16" Height="16" Stretch="Uniform"/>
                             </ToggleButton>
