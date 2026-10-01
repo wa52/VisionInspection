@@ -2,7 +2,7 @@
         xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
         xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
         xmlns:local="clr-namespace:VisionInspection"
-        Title="Vision Inspection · 工业视觉质检平台"
+        Title="工业视觉检测平台"
         Height="940" Width="1600" MinWidth="1280" MinHeight="760"
         WindowStartupLocation="CenterScreen"
         Closed="Window_Closed"
@@ -63,7 +63,7 @@
                     <ColumnDefinition Width="Auto"/>
                 </Grid.ColumnDefinitions>
 
-                <Border Width="34" Height="34" CornerRadius="8"
+                <Border Width="34" Height="34" CornerRadius="4"
                         Background="{StaticResource AccentSoftBrush}"
                         BorderBrush="{StaticResource AccentBrush}"
                         BorderThickness="1"
@@ -76,8 +76,8 @@
                 </Border>
 
                 <StackPanel Grid.Column="1" VerticalAlignment="Center">
-                    <TextBlock Text="VISION INSPECTION" FontSize="15" FontWeight="SemiBold"/>
-                    <TextBlock Text="工业视觉质检平台 · PRODUCTION CONSOLE"
+                    <TextBlock Text="工业视觉检测平台" FontSize="15" FontWeight="SemiBold"/>
+                    <TextBlock Text="视觉检测与产线质检"
                                Style="{StaticResource EyebrowText}"
                                Margin="0,2,0,0"/>
                 </StackPanel>
@@ -96,14 +96,13 @@
                 <StackPanel Grid.Column="3" Orientation="Horizontal" VerticalAlignment="Center">
                     <Border Style="{StaticResource StatusChipBorder}">
                         <StackPanel Orientation="Horizontal">
-                            <Ellipse Width="7" Height="7" Fill="{StaticResource OkBrush}" Margin="0,0,7,0"/>
-                            <TextBlock Text="系统就绪" FontSize="11" Foreground="{StaticResource MutedTextBrush}"/>
+                            <TextBlock Text="本地工作站" FontSize="11" Foreground="{StaticResource MutedTextBrush}"/>
                         </StackPanel>
                     </Border>
                     <Border Style="{StaticResource StatusChipBorder}">
                         <StackPanel Orientation="Horizontal">
-                            <TextBlock Text="MODE" Style="{StaticResource EyebrowText}" Margin="0,0,7,0"/>
-                            <TextBlock Text="PRODUCTION" FontSize="11" FontWeight="SemiBold"/>
+                            <TextBlock Text="模式" Style="{StaticResource EyebrowText}" Margin="0,0,7,0"/>
+                            <TextBlock Text="产线" FontSize="11" FontWeight="SemiBold"/>
                         </StackPanel>
                     </Border>
                 </StackPanel>
@@ -165,8 +164,8 @@
                         <ColumnDefinition Width="*"/>
                     </Grid.ColumnDefinitions>
                     <StackPanel VerticalAlignment="Center" Margin="0,0,10,0">
-                        <TextBlock Text="ACTIVE RECIPE" Style="{StaticResource EyebrowText}"/>
-                        <TextBlock Text="当前方案" FontSize="11" Foreground="{StaticResource MutedTextBrush}" Margin="0,2,0,0"/>
+                        <TextBlock Text="当前方案" Style="{StaticResource EyebrowText}"/>
+                        <TextBlock Text="选择或编辑检测方案" FontSize="11" Foreground="{StaticResource MutedTextBrush}" Margin="0,2,0,0"/>
                     </StackPanel>
                     <ComboBox x:Name="RecipeCombo" Grid.Column="1" Height="34" IsEditable="True" VerticalAlignment="Center"/>
                     <ToggleButton x:Name="BtnLock" Grid.Column="2" Width="34" Height="34" Padding="0" Margin="8,0,0,0"
@@ -194,9 +193,9 @@
                             <TextBlock Text="连续执行" Foreground="White"/>
                         </StackPanel>
                     </Button>
-                    <Border Background="{StaticResource SurfaceRaisedBrush}" BorderBrush="{StaticResource BorderStrongBrush}" BorderThickness="1" CornerRadius="7" Padding="10,5" MinWidth="96">
+                    <Border Background="{StaticResource SurfaceRaisedBrush}" BorderBrush="{StaticResource BorderStrongBrush}" BorderThickness="1" CornerRadius="4" Padding="10,5" MinWidth="96">
                         <StackPanel>
-                            <TextBlock Text="FINAL" Style="{StaticResource EyebrowText}" HorizontalAlignment="Center"/>
+                            <TextBlock Text="最终判定" Style="{StaticResource EyebrowText}" HorizontalAlignment="Center"/>
                             <TextBlock x:Name="FinalVerdictText"
                                        Text="{Binding FinalDecision, FallbackValue=待机}"
                                        FontSize="15" FontWeight="Bold"
@@ -234,11 +233,11 @@
                                 <ColumnDefinition Width="Auto"/>
                             </Grid.ColumnDefinitions>
                             <StackPanel>
-                                <TextBlock Text="PRODUCTION" Style="{StaticResource EyebrowText}"/>
+                                <TextBlock Text="设备与执行状态" Style="{StaticResource EyebrowText}"/>
                                 <TextBlock Text="生产状态" Style="{StaticResource SectionTitle}" Margin="0,3,0,0"/>
                             </StackPanel>
-                            <Border Grid.Column="1" Background="{StaticResource SurfaceRaisedBrush}" BorderBrush="{StaticResource BorderBrush}" BorderThickness="1" CornerRadius="12" Padding="8,4" VerticalAlignment="Center">
-                                <TextBlock Text="LIVE" FontSize="10" FontWeight="SemiBold" Foreground="{StaticResource AccentHoverBrush}"/>
+                            <Border Grid.Column="1" Background="{StaticResource SurfaceRaisedBrush}" BorderBrush="{StaticResource BorderBrush}" BorderThickness="1" CornerRadius="4" Padding="8,4" VerticalAlignment="Center">
+                                <TextBlock Text="状态" FontSize="10" FontWeight="SemiBold" Foreground="{StaticResource AccentHoverBrush}"/>
                             </Border>
                         </Grid>
                         <Border Height="1" Background="{StaticResource BorderBrush}" Margin="0,12"/>
@@ -272,7 +271,7 @@
                                 <ColumnDefinition Width="Auto"/>
                             </Grid.ColumnDefinitions>
                             <StackPanel VerticalAlignment="Center">
-                                <TextBlock Text="PIPELINE" Style="{StaticResource EyebrowText}"/>
+                                <TextBlock Text="流程配置" Style="{StaticResource EyebrowText}"/>
                                 <TextBlock Text="检测流程" Style="{StaticResource SectionTitle}" Margin="0,2,0,0"/>
                             </StackPanel>
                             <Button x:Name="BtnAddNode" Grid.Column="1" Style="{StaticResource SoftButton}" Content="+ 添加模块"
@@ -302,8 +301,8 @@
                         </Grid.ColumnDefinitions>
                         <StackPanel Orientation="Horizontal" Margin="14,0" VerticalAlignment="Center">
                             <StackPanel>
-                                <TextBlock Text="VISION WORKSPACE" Style="{StaticResource EyebrowText}"/>
-                                <TextBlock Text="视觉工作区" Style="{StaticResource SectionTitle}" Margin="0,2,0,0"/>
+                                <TextBlock Text="视觉检测" Style="{StaticResource EyebrowText}"/>
+                                <TextBlock Text="图像检测区" Style="{StaticResource SectionTitle}" Margin="0,2,0,0"/>
                             </StackPanel>
                             <Border Width="1" Height="25" Background="{StaticResource BorderBrush}" Margin="14,0"/>
                             <TextBlock x:Name="ResultCaption" Text="执行结果" Foreground="{StaticResource MutedTextBrush}" FontSize="11"/>
@@ -339,10 +338,6 @@
                           PreviewMouseDown="ImageViewport_PreviewMouseDown"
                           PreviewMouseMove="ImageViewport_PreviewMouseMove"
                           PreviewMouseUp="ImageViewport_PreviewMouseUp">
-                        <StackPanel HorizontalAlignment="Center" VerticalAlignment="Center" IsHitTestVisible="False" Opacity="0.28">
-                            <Ellipse Width="54" Height="54" Stroke="{StaticResource BorderStrongBrush}" StrokeThickness="1.5"/>
-                            <TextBlock Text="INSPECTION VIEWPORT" Foreground="{StaticResource SubtleTextBrush}" FontSize="10" FontWeight="SemiBold" HorizontalAlignment="Center" Margin="0,10,0,0"/>
-                        </StackPanel>
                         <Image x:Name="ResultImage" Stretch="Uniform" Margin="8" RenderTransformOrigin="0.5,0.5"/>
                         <Canvas x:Name="RoiCanvas" Margin="8" Background="Transparent" IsHitTestVisible="False"
                                 RenderTransformOrigin="0.5,0.5"
@@ -379,8 +374,8 @@
                         <RowDefinition Height="*"/>
                     </Grid.RowDefinitions>
                     <StackPanel Margin="14,0" VerticalAlignment="Center">
-                        <TextBlock Text="INSPECTOR" Style="{StaticResource EyebrowText}"/>
-                        <TextBlock Text="检查器" Style="{StaticResource SectionTitle}" Margin="0,2,0,0"/>
+                        <TextBlock Text="节点信息" Style="{StaticResource EyebrowText}"/>
+                        <TextBlock Text="节点检查" Style="{StaticResource SectionTitle}" Margin="0,2,0,0"/>
                     </StackPanel>
                     <Border Grid.Row="1" Background="{StaticResource BorderBrush}"/>
                     <TabControl Grid.Row="2" Margin="12,6,12,12">
@@ -429,7 +424,7 @@
                             <ColumnDefinition Width="Auto"/>
                         </Grid.ColumnDefinitions>
                         <StackPanel VerticalAlignment="Center">
-                            <TextBlock Text="PRODUCTION EVIDENCE" Style="{StaticResource EyebrowText}"/>
+                            <TextBlock Text="检测记录" Style="{StaticResource EyebrowText}"/>
                             <TextBlock Text="检测记录" FontWeight="SemiBold" Margin="0,2,0,0"/>
                         </StackPanel>
                         <TextBlock Grid.Column="1" Text="最近 200 条" Style="{StaticResource PanelCaption}" VerticalAlignment="Center"/>
@@ -459,11 +454,11 @@
                             <ColumnDefinition Width="Auto"/>
                         </Grid.ColumnDefinitions>
                         <StackPanel VerticalAlignment="Center">
-                            <TextBlock Text="RUNTIME LOG" Style="{StaticResource EyebrowText}"/>
+                            <TextBlock Text="运行日志" Style="{StaticResource EyebrowText}"/>
                             <TextBlock Text="实时日志" FontWeight="SemiBold" Margin="0,2,0,0"/>
                         </StackPanel>
-                        <Border Grid.Column="1" Background="{StaticResource OkSoftBrush}" BorderBrush="{StaticResource OkBrush}" BorderThickness="1" CornerRadius="10" Padding="7,3" VerticalAlignment="Center">
-                            <TextBlock Text="ONLINE" FontSize="9" FontWeight="SemiBold" Foreground="{StaticResource OkBrush}"/>
+                        <Border Grid.Column="1" Background="{StaticResource OkSoftBrush}" BorderBrush="{StaticResource OkBrush}" BorderThickness="1" CornerRadius="4" Padding="7,3" VerticalAlignment="Center">
+                            <TextBlock Text="记录中" FontSize="9" FontWeight="SemiBold" Foreground="{StaticResource OkBrush}"/>
                         </Border>
                     </Grid>
                     <Border Grid.Row="1" Background="{StaticResource BorderBrush}"/>
@@ -488,7 +483,7 @@
                 <TextBlock x:Name="StatusFps" Text="{Binding FpsStatus, FallbackValue=FPS: -}"/>
             </StatusBarItem>
             <StatusBarItem HorizontalAlignment="Right">
-                <TextBlock Text="VisionInspection · x64 · .NET 8" Foreground="{StaticResource SubtleTextBrush}"/>
+                <TextBlock Text="工业视觉检测平台 · x64 · .NET 8" Foreground="{StaticResource SubtleTextBrush}"/>
             </StatusBarItem>
         </StatusBar>
     </Grid>
