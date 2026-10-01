@@ -2,27 +2,27 @@
                     xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml">
 
     <!-- ===== Commercial dark design tokens ===== -->
-    <SolidColorBrush x:Key="BgBrush" Color="#0B1016" />
-    <SolidColorBrush x:Key="PanelBrush" Color="#101720" />
-    <SolidColorBrush x:Key="SurfaceRaisedBrush" Color="#151E29" />
-    <SolidColorBrush x:Key="ViewportBrush" Color="#070B10" />
-    <SolidColorBrush x:Key="ViewportBarBrush" Color="#0D141D" />
-    <SolidColorBrush x:Key="BorderBrush" Color="#263444" />
-    <SolidColorBrush x:Key="BorderStrongBrush" Color="#34475B" />
-    <SolidColorBrush x:Key="TextBrush" Color="#E8EEF6" />
-    <SolidColorBrush x:Key="MutedTextBrush" Color="#92A0B1" />
-    <SolidColorBrush x:Key="SubtleTextBrush" Color="#667587" />
-    <SolidColorBrush x:Key="AccentBrush" Color="#3B82F6" />
-    <SolidColorBrush x:Key="AccentHoverBrush" Color="#60A5FA" />
-    <SolidColorBrush x:Key="AccentSoftBrush" Color="#17345F" />
-    <SolidColorBrush x:Key="OkBrush" Color="#22C55E" />
-    <SolidColorBrush x:Key="OkSoftBrush" Color="#12351F" />
-    <SolidColorBrush x:Key="NgBrush" Color="#EF4444" />
-    <SolidColorBrush x:Key="NgSoftBrush" Color="#3B171A" />
-    <SolidColorBrush x:Key="WarnBrush" Color="#F59E0B" />
-    <SolidColorBrush x:Key="WarnSoftBrush" Color="#3A2A0D" />
-    <SolidColorBrush x:Key="SelBrush" Color="#172D49" />
-    <SolidColorBrush x:Key="HoverBrush" Color="#1B2734" />
+    <SolidColorBrush x:Key="BgBrush" Color="#F3F5F7" />
+    <SolidColorBrush x:Key="PanelBrush" Color="#FFFFFF" />
+    <SolidColorBrush x:Key="SurfaceRaisedBrush" Color="#F7F9FB" />
+    <SolidColorBrush x:Key="ViewportBrush" Color="#101317" />
+    <SolidColorBrush x:Key="ViewportBarBrush" Color="#E9EDF2" />
+    <SolidColorBrush x:Key="BorderBrush" Color="#D5DAE0" />
+    <SolidColorBrush x:Key="BorderStrongBrush" Color="#BCC5CE" />
+    <SolidColorBrush x:Key="TextBrush" Color="#20262E" />
+    <SolidColorBrush x:Key="MutedTextBrush" Color="#5F6B78" />
+    <SolidColorBrush x:Key="SubtleTextBrush" Color="#8A95A3" />
+    <SolidColorBrush x:Key="AccentBrush" Color="#2563EB" />
+    <SolidColorBrush x:Key="AccentHoverBrush" Color="#1D4ED8" />
+    <SolidColorBrush x:Key="AccentSoftBrush" Color="#E8F0FE" />
+    <SolidColorBrush x:Key="OkBrush" Color="#16A34A" />
+    <SolidColorBrush x:Key="OkSoftBrush" Color="#ECFDF3" />
+    <SolidColorBrush x:Key="NgBrush" Color="#DC2626" />
+    <SolidColorBrush x:Key="NgSoftBrush" Color="#FEF2F2" />
+    <SolidColorBrush x:Key="WarnBrush" Color="#D97706" />
+    <SolidColorBrush x:Key="WarnSoftBrush" Color="#FFF7ED" />
+    <SolidColorBrush x:Key="SelBrush" Color="#E7EFFB" />
+    <SolidColorBrush x:Key="HoverBrush" Color="#F1F4F7" />
 
     <Style TargetType="Window">
         <Setter Property="Background" Value="{StaticResource BgBrush}" />
@@ -64,7 +64,7 @@
         <Setter Property="Background" Value="{StaticResource PanelBrush}" />
         <Setter Property="BorderBrush" Value="{StaticResource BorderBrush}" />
         <Setter Property="BorderThickness" Value="1" />
-        <Setter Property="CornerRadius" Value="8" />
+        <Setter Property="CornerRadius" Value="6" />
     </Style>
 
     <Style x:Key="RaisedCard" TargetType="Border" BasedOn="{StaticResource Card}">
@@ -104,7 +104,7 @@
                                 Background="{TemplateBinding Background}"
                                 BorderBrush="{TemplateBinding BorderBrush}"
                                 BorderThickness="1"
-                                CornerRadius="6" />
+                                CornerRadius="5" />
                         <ToggleButton x:Name="ToggleButton"
                                       Focusable="False"
                                       Background="Transparent"
@@ -154,7 +154,7 @@
                             <Border Background="{StaticResource SurfaceRaisedBrush}"
                                     BorderBrush="{StaticResource BorderStrongBrush}"
                                     BorderThickness="1"
-                                    CornerRadius="6"
+                                    CornerRadius="5"
                                     MinWidth="{TemplateBinding ActualWidth}"
                                     MaxHeight="300"
                                     Margin="0,4,0,0">
@@ -191,7 +191,7 @@
         <Setter Property="Template">
             <Setter.Value>
                 <ControlTemplate TargetType="ComboBoxItem">
-                    <Border x:Name="ItemBorder" Background="{TemplateBinding Background}" CornerRadius="4" Padding="{TemplateBinding Padding}">
+                    <Border x:Name="ItemBorder" Background="{TemplateBinding Background}" CornerRadius="3" Padding="{TemplateBinding Padding}">
                         <ContentPresenter />
                     </Border>
                     <ControlTemplate.Triggers>
@@ -223,7 +223,7 @@
                             Background="{TemplateBinding Background}"
                             BorderBrush="{TemplateBinding BorderBrush}"
                             BorderThickness="1"
-                            CornerRadius="6"
+                            CornerRadius="5"
                             Padding="{TemplateBinding Padding}">
                         <ContentPresenter HorizontalAlignment="Center"
                                           VerticalAlignment="Center"
@@ -240,7 +240,7 @@
         </Setter>
         <Style.Triggers>
             <Trigger Property="IsMouseOver" Value="True">
-                <Setter Property="Background" Value="#233243" />
+                <Setter Property="Background" Value="#E8EDF2" />
                 <Setter Property="BorderBrush" Value="{StaticResource BorderStrongBrush}" />
             </Trigger>
             <Trigger Property="IsPressed" Value="True">
@@ -261,8 +261,8 @@
                 <Setter Property="BorderBrush" Value="{StaticResource AccentHoverBrush}" />
             </Trigger>
             <Trigger Property="IsPressed" Value="True">
-                <Setter Property="Background" Value="#2563EB" />
-                <Setter Property="BorderBrush" Value="#2563EB" />
+                <Setter Property="Background" Value="#1D4ED8" />
+                <Setter Property="BorderBrush" Value="#1D4ED8" />
             </Trigger>
         </Style.Triggers>
     </Style>
@@ -270,7 +270,7 @@
     <Style x:Key="SuccessButton" TargetType="Button" BasedOn="{StaticResource {x:Type Button}}">
         <Setter Property="Background" Value="{StaticResource OkSoftBrush}" />
         <Setter Property="BorderBrush" Value="{StaticResource OkBrush}" />
-        <Setter Property="Foreground" Value="#DDFBE8" />
+        <Setter Property="Foreground" Value="#166534" />
         <Setter Property="FontWeight" Value="SemiBold" />
     </Style>
 
@@ -301,7 +301,7 @@
                             Background="{TemplateBinding Background}"
                             BorderBrush="{TemplateBinding BorderBrush}"
                             BorderThickness="1"
-                            CornerRadius="6"
+                            CornerRadius="5"
                             Padding="{TemplateBinding Padding}">
                         <ContentPresenter HorizontalAlignment="Center" VerticalAlignment="Center" />
                     </Border>
@@ -357,10 +357,10 @@
         <Setter Property="Padding" Value="6,4" />
         <Setter Property="Margin" Value="0,1" />
         <Style.Resources>
-            <SolidColorBrush x:Key="{x:Static SystemColors.HighlightBrushKey}" Color="#172D49" />
-            <SolidColorBrush x:Key="{x:Static SystemColors.HighlightTextBrushKey}" Color="#E8EEF6" />
-            <SolidColorBrush x:Key="{x:Static SystemColors.InactiveSelectionHighlightBrushKey}" Color="#172D49" />
-            <SolidColorBrush x:Key="{x:Static SystemColors.InactiveSelectionHighlightTextBrushKey}" Color="#E8EEF6" />
+            <SolidColorBrush x:Key="{x:Static SystemColors.HighlightBrushKey}" Color="#E7EFFB" />
+            <SolidColorBrush x:Key="{x:Static SystemColors.HighlightTextBrushKey}" Color="#20262E" />
+            <SolidColorBrush x:Key="{x:Static SystemColors.InactiveSelectionHighlightBrushKey}" Color="#E7EFFB" />
+            <SolidColorBrush x:Key="{x:Static SystemColors.InactiveSelectionHighlightTextBrushKey}" Color="#20262E" />
         </Style.Resources>
         <Style.Triggers>
             <Trigger Property="IsSelected" Value="True">
@@ -424,7 +424,7 @@
         <Setter Property="GridLinesVisibility" Value="Horizontal" />
         <Setter Property="HorizontalGridLinesBrush" Value="{StaticResource BorderBrush}" />
         <Setter Property="RowBackground" Value="Transparent" />
-        <Setter Property="AlternatingRowBackground" Value="#0D151E" />
+        <Setter Property="AlternatingRowBackground" Value="#F8FAFC" />
         <Setter Property="HeadersVisibility" Value="Column" />
         <Setter Property="RowHeaderWidth" Value="0" />
         <Setter Property="CanUserAddRows" Value="False" />
@@ -499,7 +499,7 @@
                     <Border Background="{TemplateBinding Background}"
                             BorderBrush="{TemplateBinding BorderBrush}"
                             BorderThickness="1"
-                            CornerRadius="6"
+                            CornerRadius="5"
                             Padding="9,6">
                         <ContentPresenter />
                     </Border>
@@ -510,7 +510,7 @@
 
     <Style TargetType="TextBox" x:Key="LogBox" BasedOn="{StaticResource {x:Type TextBox}}">
         <Setter Property="Background" Value="{StaticResource ViewportBrush}" />
-        <Setter Property="Foreground" Value="#AAB7C6" />
+        <Setter Property="Foreground" Value="#44505E" />
         <Setter Property="BorderThickness" Value="0" />
         <Setter Property="IsReadOnly" Value="True" />
         <Setter Property="FontFamily" Value="Cascadia Mono, Consolas" />
