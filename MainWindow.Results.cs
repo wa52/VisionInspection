@@ -161,7 +161,7 @@ public partial class MainWindow
 		if (1 == 0)
 		{
 		}
-		Brush foreground = ((decision == "OK") ? new SolidColorBrush(Color.FromRgb(29, 209, 161)) : ((!(decision == "NG")) ? new SolidColorBrush(Color.FromRgb(245, 166, 35)) : new SolidColorBrush(Color.FromRgb(byte.MaxValue, 107, 107))));
+		Brush foreground = ((decision == "OK") ? (Brush)FindResource("OkBrush") : ((!(decision == "NG")) ? (Brush)FindResource("WarnBrush") : (Brush)FindResource("NgBrush")));
 		if (1 == 0)
 		{
 		}
@@ -377,16 +377,16 @@ public partial class MainWindow
 		if (flag7)
 		{
 			RunContinuousIcon.Data = Geometry.Parse(IconStopData);
-			BtnRunContinuous.Background = new SolidColorBrush(Color.FromRgb(107, 48, 48));
-			BtnRunContinuous.BorderBrush = new SolidColorBrush(Color.FromRgb(138, 64, 64));
+			BtnRunContinuous.Background = (Brush)FindResource("NgSoftBrush");
+			BtnRunContinuous.BorderBrush = (Brush)FindResource("NgBrush");
 			BtnRunContinuous.IsEnabled = true;
 			BtnRunContinuous.ToolTip = "停止执行";
 		}
 		else
 		{
 			RunContinuousIcon.Data = Geometry.Parse(IconContinuousData);
-			BtnRunContinuous.Background = new SolidColorBrush(Color.FromRgb(31, 74, 110));
-			BtnRunContinuous.BorderBrush = new SolidColorBrush(Color.FromRgb(47, 106, 158));
+			BtnRunContinuous.Background = (Brush)FindResource("AccentBrush");
+			BtnRunContinuous.BorderBrush = (Brush)FindResource("AccentHoverBrush");
 			BtnRunContinuous.IsEnabled = isEnabled;
 			BtnRunContinuous.ToolTip = "连续执行：循环执行检测流程（再次点击停止）";
 		}
@@ -643,7 +643,7 @@ public partial class MainWindow
 			_lastNodeValues = result.NodeDetails;
 			RefreshInspectorModuleResult();
 			ViewModel.FinalDecision = result.Decision;
-			FinalVerdictText.Foreground = ((result.Decision == "OK") ? new SolidColorBrush(Color.FromRgb(29, 209, 161)) : ((!(result.Decision == "NG")) ? new SolidColorBrush(Color.FromRgb(245, 166, 35)) : new SolidColorBrush(Color.FromRgb(byte.MaxValue, 107, 107))));
+			FinalVerdictText.Foreground = ((result.Decision == "OK") ? (Brush)FindResource("OkBrush") : ((!(result.Decision == "NG")) ? (Brush)FindResource("WarnBrush") : (Brush)FindResource("NgBrush")));
 			RefreshStatusPanel();
 		}, Array.Empty<object>());
 	}
