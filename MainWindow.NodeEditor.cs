@@ -649,21 +649,29 @@ public partial class MainWindow
 	private void ShowDecisionRulesEditor(RecipeNode rn)
 	{
 		DecisionRule rule = EnsureDecisionRule(rn);
-		EditorPanel.Children.Add(new TextBlock
+		var rulesPanel = EditorPanel.Children.OfType<StackPanel>()
+			.FirstOrDefault(panel => ReferenceEquals(panel.Tag, rule));
+		if (rulesPanel == null)
+		{
+			rulesPanel = new StackPanel { Tag = rule };
+			EditorPanel.Children.Add(rulesPanel);
+		}
+		rulesPanel.Children.Clear();
+		rulesPanel.Children.Add(new TextBlock
 		{
 			Text = "判断模块",
 			FontWeight = FontWeights.Bold,
 			FontSize = 15.0,
 			Margin = new Thickness(0.0, 4.0, 0.0, 8.0)
 		});
-		EditorPanel.Children.Add(new TextBlock
+		rulesPanel.Children.Add(new TextBlock
 		{
 			Text = "基本参数 | 结果显示",
 			Foreground = (Brush)FindResource("MutedTextBrush"),
 			Margin = new Thickness(0.0, 0.0, 0.0, 8.0),
 			FontSize = 12.0
 		});
-		EditorPanel.Children.Add(new TextBlock
+		rulesPanel.Children.Add(new TextBlock
 		{
 			Text = "判断方式",
 			Foreground = (Brush)FindResource("MutedTextBrush"),
@@ -681,9 +689,9 @@ public partial class MainWindow
 		{
 			rule.MatchMode = ((modeCombo.SelectedItem?.ToString() == "任意条件符合") ? "any" : "all");
 		};
-		EditorPanel.Children.Add(modeCombo);
+		rulesPanel.Children.Add(modeCombo);
 		string value = (string.Equals(rule.MatchMode, "any", StringComparison.OrdinalIgnoreCase) ? "任意启用条件符合" : "所有启用条件符合");
-		EditorPanel.Children.Add(new TextBlock
+		rulesPanel.Children.Add(new TextBlock
 		{
 			Text = $"说明：{value}时输出 {DisplayDecision(rule.Result, "OK")}，否则输出 {DisplayDecision(rule.ElseResult, "NG")}",
 			TextWrapping = TextWrapping.Wrap,
@@ -709,12 +717,12 @@ public partial class MainWindow
 		});
 		AddGridText(grid, "检测节点", 0, header: true);
 		AddGridText(grid, "测试结果", 1, header: true);
-		EditorPanel.Children.Add(grid);
+		rulesPanel.Children.Add(grid);
 		for (int num = 0; num < rule.Conditions.Count; num++)
 		{
-			AddDecisionConditionRow(rn, rule, num);
+			AddDecisionConditionRow(rn, rule, num, rulesPanel);
 		}
-		EditorPanel.Children.Add(new Button
+		rulesPanel.Children.Add(new Button
 		{
 			Content = "+ 添加条件",
 			Margin = new Thickness(0.0, 10.0, 0.0, 0.0)
@@ -726,14 +734,14 @@ public partial class MainWindow
 				ShowDecisionRulesEditor(rn);
 			};
 		}));
-		EditorPanel.Children.Add(new TextBlock
+		rulesPanel.Children.Add(new TextBlock
 		{
 			Text = "输出",
 			FontWeight = FontWeights.Bold,
 			Margin = new Thickness(0.0, 16.0, 0.0, 6.0)
 		});
-		AddDecisionOutputRow("符合", rule, isHit: true);
-		AddDecisionOutputRow("不符合", rule, isHit: false);
+		AddDecisionOutputRow("符合", rule, rulesPanel, isHit: true);
+		AddDecisionOutputRow("不符合", rule, rulesPanel, isHit: false);
 	}
 
 	private void ShowParamDefsInspector(RecipeNode rn, NodeParamDialog? dialog = null)
@@ -1766,7 +1774,7 @@ public partial class MainWindow
 		}
 	}
 
-	private void AddDecisionConditionRow(RecipeNode rn, DecisionRule rule, int conditionIndex)
+	private void AddDecisionConditionRow(RecipeNode rn, DecisionRule rule, int conditionIndex, StackPanel panel)
 	{
 		VisionInspection.Models.Condition cond = rule.Conditions[conditionIndex];
 		cond.Field = "decision";
@@ -1848,10 +1856,10 @@ public partial class MainWindow
 		};
 		Grid.SetColumn(button, 2);
 		grid.Children.Add(button);
-		EditorPanel.Children.Add(grid);
+		panel.Children.Add(grid);
 	}
 
-	private void AddDecisionOutputRow(string label, DecisionRule rule, bool isHit)
+	private void AddDecisionOutputRow(string label, DecisionRule rule, StackPanel panel, bool isHit)
 	{
 		DockPanel dockPanel = new DockPanel
 		{
@@ -1881,7 +1889,7 @@ public partial class MainWindow
 			}
 		};
 		dockPanel.Children.Add(box);
-		EditorPanel.Children.Add(dockPanel);
+		panel.Children.Add(dockPanel);
 	}
 
 	private void AddGridText(Grid grid, string text, int column, bool header)
