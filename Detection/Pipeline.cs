@@ -190,6 +190,12 @@ public sealed class Pipeline : IDisposable
     /// <summary>运行整条流水线。返回最终结果；任一启用节点异常 → 整线判定 ERROR。
     /// sourceOverrides：外部注入指定节点的输出图（通常是图像源节点，用于打分目录走与检测完全相同的链路）；
     /// 命中的图像源节点跳过自身取图，注入的 Mat 所有权归 Run（与 bgr 同实例则由调用方释放）。</summary>
+    /// <summary>一次新播放启动时仅重置已经播放完毕的视频源，保留中途暂停的游标。</summary>
+    public void RestartCompletedVideoSources()
+    {
+        foreach (var source in _nodes.OfType<VideoSourceNode>()) source.RestartIfFinished();
+    }
+
     public PipelineResult Run(
         Mat bgr,
         string imageName,
