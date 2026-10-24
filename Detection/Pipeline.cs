@@ -71,6 +71,7 @@ public sealed class Pipeline : IDisposable
                 case CameraIoNode c: c.Log = _log; break;
                 case ImageSourceNode isrc: isrc.Log = _log; break;
                 case VideoSourceNode video: video.Log = _log; break;
+                case MultiObjectTrackingNode tracking: tracking.Log = _log; break;
                 case BinarizeNode bz: bz.Log = _log; break;
                 case GeometryNode geo: geo.Log = _log; break;
                 case ColorTransformNode ct: ct.Log = _log; break;
@@ -274,7 +275,7 @@ public sealed class Pipeline : IDisposable
                 {
                     ranModelNode = true;
                 }
-                _log?.Invoke($"[流水线] {node.Name}: {string.Join(",", nr.Values.Select(kv => $"{kv.Key}={kv.Value}"))}");
+                _log?.Invoke($"[流水线] {node.Name}: {string.Join(",", nr.Values.Where(kv => !kv.Key.EndsWith("_json", StringComparison.Ordinal)).Select(kv => $"{kv.Key}={kv.Value}"))}");
                 if (node is VideoSourceNode && nr.Values.GetValueOrDefault("eof") == "true")
                 {
                     result.EndOfStream = true;
@@ -411,7 +412,7 @@ public sealed class Pipeline : IDisposable
             if (nr.Annotations.Count > 0) result.NodeAnnotations[name] = nr.Annotations;
             if (nr.Threshold is { } th && result.NodeThreshold == null) result.NodeThreshold = th;
             if (nr.HeatMap != null) result.HeatMap = nr.HeatMap;
-            _log?.Invoke($"[流水线] {name}: {string.Join(",", nr.Values.Select(kv => $"{kv.Key}={kv.Value}"))}");
+            _log?.Invoke($"[流水线] {name}: {string.Join(",", nr.Values.Where(kv => !kv.Key.EndsWith("_json", StringComparison.Ordinal)).Select(kv => $"{kv.Key}={kv.Value}"))}");
         }
 
         // 阶段2：按序串行跑判断/保存节点（依赖阶段1结果）。
@@ -444,7 +445,7 @@ public sealed class Pipeline : IDisposable
                 if (nr.Threshold is { } th && result.NodeThreshold == null) result.NodeThreshold = th;
                 if (nr.HeatMap != null) result.HeatMap = nr.HeatMap;
                 if (node is DecisionNode) ctx.DecisionResult = nr;
-                _log?.Invoke($"[流水线] {node.Name}: {string.Join(",", nr.Values.Select(kv => $"{kv.Key}={kv.Value}"))}");
+                _log?.Invoke($"[流水线] {node.Name}: {string.Join(",", nr.Values.Where(kv => !kv.Key.EndsWith("_json", StringComparison.Ordinal)).Select(kv => $"{kv.Key}={kv.Value}"))}");
             }
             catch (Exception ex)
             {
@@ -516,7 +517,7 @@ public sealed class Pipeline : IDisposable
 
     private static bool IsModelNode(IModelNode node) =>
         node is not DecisionNode and not SaveImageNode and not DisplayNode and not CameraIoNode
-        and not ImageSourceNode and not VideoSourceNode and not BinarizeNode and not GeometryNode and not KeyControlNode
+        and not ImageSourceNode and not VideoSourceNode and not MultiObjectTrackingNode and not BinarizeNode and not GeometryNode and not KeyControlNode
         and not SendDataNode and not ReceiveDataNode and not LineFindNode and not CircleFindNode
         and not MeasureNodeBase and not OverlayDisplayNode;
 

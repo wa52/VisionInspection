@@ -22,6 +22,7 @@ public static class NodeFactory
         // 图像源节点（相机/图像文件，作为流程图像源）
         Register("ImageSource", (name, init) => new ImageSourceNode(name, init));
         Register("VideoSource", (name, init) => new VideoSourceNode(name, init));
+        Register("MultiObjectTracking", (name, init) => new MultiObjectTrackingNode(name, init));
         // 图像二值化节点（可调阈值/类型/Otsu）
         Register("Binarize", (name, init) => new BinarizeNode(name, init));
         // 几何变换节点（缩放/旋转/翻转）
