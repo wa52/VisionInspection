@@ -483,7 +483,7 @@ public sealed class Pipeline : IDisposable
             result.NodeImages[node.Name] = img;
             images.Remove(node.Name);
             lastName = node.Name;
-            if (node is OverlayDisplayNode) lastOverlayName = node.Name;
+            if (node is OverlayDisplayNode or MultiObjectTrackingNode) lastOverlayName = node.Name;
             if (IsModelNode(node)) lastModelName = node.Name;
         }
 
