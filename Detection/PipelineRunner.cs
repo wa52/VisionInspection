@@ -97,6 +97,7 @@ public sealed class PipelineRunner : IDisposable
                         }
 
                         Completed?.Invoke(result);
+                        if (result.EndOfStream) break; // 视频源正常结束，不再无效循环。
                         try
                         {
                             await Task.Delay(1, ct);

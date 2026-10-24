@@ -14,6 +14,8 @@ public sealed class PipelineResult
     public double? Threshold { get; set; }
     public string ProcessedAt { get; set; } = "";
     public string? Error { get; set; }
+    /// <summary>视频源到达文件末尾；连续运行应正常退出，不再派发最后一帧。</summary>
+    public bool EndOfStream { get; set; }
     /// <summary>节点名 → 该节点输出值（供 UI 展示每模型 score）。</summary>
     public Dictionary<string, Dictionary<string, string>> NodeValues { get; } = new();
     /// <summary>PatchCore 热图（若有）。</summary>
@@ -68,6 +70,7 @@ public sealed class Pipeline : IDisposable
                 case SaveImageNode s: s.Log = _log; break;
                 case CameraIoNode c: c.Log = _log; break;
                 case ImageSourceNode isrc: isrc.Log = _log; break;
+                case VideoSourceNode video: video.Log = _log; break;
                 case BinarizeNode bz: bz.Log = _log; break;
                 case GeometryNode geo: geo.Log = _log; break;
                 case ColorTransformNode ct: ct.Log = _log; break;
@@ -150,6 +153,10 @@ public sealed class Pipeline : IDisposable
                     pc.EnsureLoaded(_recipe.BaseDir);
                     _log?.Invoke($"[校验] {node.Name}: 模型已加载: {pc.ResolvedModelDir}");
                     break;
+                case VideoSourceNode video:
+                    video.EnsureOpened(_recipe.BaseDir);
+                    _log?.Invoke($"[校验] {node.Name}: 已打开视频源: {video.ResolvedPath}");
+                    break;
                 case YoloNode yn:
                     yn.EnsureLoaded(_recipe.BaseDir);
                     _log?.Invoke($"[校验] {node.Name}: 模型已加载: {yn.ResolvedModelDir}");
@@ -174,7 +181,7 @@ public sealed class Pipeline : IDisposable
         }
         catch (Exception ex)
         {
-            var hint = node is YoloNode or SegNode or SemanticSegNode or ContourMatchNode or CharRecNode ? "「模型目录」" : "「模型路径」";
+            var hint = node is VideoSourceNode ? "「视频文件」" : node is YoloNode or SegNode or SemanticSegNode or ContourMatchNode or CharRecNode ? "「模型目录」" : "「模型路径」";
             _log?.Invoke($"[校验] {node.Name}: 模型加载失败: {ex.Message}（请检查{hint}参数）");
         }
     }
@@ -268,6 +275,11 @@ public sealed class Pipeline : IDisposable
                     ranModelNode = true;
                 }
                 _log?.Invoke($"[流水线] {node.Name}: {string.Join(",", nr.Values.Select(kv => $"{kv.Key}={kv.Value}"))}");
+                if (node is VideoSourceNode && nr.Values.GetValueOrDefault("eof") == "true")
+                {
+                    result.EndOfStream = true;
+                    break; // EOF 不运行下游，避免最后一帧被重复统计。
+                }
             }
             catch (Exception ex)
             {
@@ -276,6 +288,7 @@ public sealed class Pipeline : IDisposable
                 _log?.Invoke($"[流水线] {node.Name} 异常: {ex.Message}");
                 // 任一启用节点出错 → 决策覆写为 ERROR（不能静默回退 OK 放行）
                 _nodeFailed = true;
+                if (node is VideoSourceNode) break;
             }
         }
 
@@ -503,7 +516,7 @@ public sealed class Pipeline : IDisposable
 
     private static bool IsModelNode(IModelNode node) =>
         node is not DecisionNode and not SaveImageNode and not DisplayNode and not CameraIoNode
-        and not ImageSourceNode and not BinarizeNode and not GeometryNode and not KeyControlNode
+        and not ImageSourceNode and not VideoSourceNode and not BinarizeNode and not GeometryNode and not KeyControlNode
         and not SendDataNode and not ReceiveDataNode and not LineFindNode and not CircleFindNode
         and not MeasureNodeBase and not OverlayDisplayNode;
 

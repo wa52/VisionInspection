@@ -183,6 +183,7 @@ public partial class MainWindow : WpfWindow
 		["SaveImage"] = "输出图像",
 		["OverlayDisplay"] = "叠加显示",
 		["ImageSource"] = "图像源",
+		["VideoSource"] = "视频源",
 		["Binarize"] = "图像二值化",
 		["Geometry"] = "几何变换",
 		["ColorTransform"] = "颜色变换",
