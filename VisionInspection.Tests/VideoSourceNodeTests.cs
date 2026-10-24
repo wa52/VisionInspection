@@ -113,6 +113,11 @@ public sealed class VideoSourceNodeTests : IDisposable
         Assert.Equal(new[] { "0", "2", "4" }, frameIndices);
         Assert.Equal(1, eosCount);
         Assert.False(runner.IsRunning);
+
+        // 新一次单次运行自动从起始帧重新播放，不需要重建流水线。
+        var replay = await runner.RunOnceAsync(pipeline, "replay");
+        Assert.Equal("0", replay.NodeValues["视频源"]["frame_index"]);
+        foreach (var image in replay.NodeImages.Values) image.Dispose();
     }
 
     public void Dispose()
