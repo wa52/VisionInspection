@@ -775,6 +775,12 @@ public partial class MainWindow
 		case "ImageLoad":
 			readOnlyList = ImageSourceNode.StaticParamDefs;
 			break;
+		case "VideoSource":
+			readOnlyList = VideoSourceNode.StaticParamDefs;
+			break;
+		case "MultiObjectTracking":
+			readOnlyList = MultiObjectTrackingNode.StaticParamDefs;
+			break;
 		case "Binarize":
 			readOnlyList = BinarizeNode.StaticParamDefs;
 			break;
@@ -1625,8 +1631,10 @@ public partial class MainWindow
 		{
 			OpenFileDialog openFileDialog = new OpenFileDialog
 			{
-				Title = "选择图像文件",
-				Filter = "图片文件 (*.png;*.jpg;*.jpeg;*.bmp;*.tif;*.tiff)|*.png;*.jpg;*.jpeg;*.bmp;*.tif;*.tiff|所有文件 (*.*)|*.*"
+				Title = rn.Type == "VideoSource" ? "选择视频文件" : "选择图像文件",
+				Filter = rn.Type == "VideoSource"
+					? "视频文件 (*.mp4;*.avi;*.mov;*.mkv;*.m4v)|*.mp4;*.avi;*.mov;*.mkv;*.m4v|所有文件 (*.*)|*.*"
+					: "图片文件 (*.png;*.jpg;*.jpeg;*.bmp;*.tif;*.tiff)|*.png;*.jpg;*.jpeg;*.bmp;*.tif;*.tiff|所有文件 (*.*)|*.*"
 			};
 			if (openFileDialog.ShowDialog(this) == true)
 			{
