@@ -14,6 +14,8 @@ public sealed class PipelineResult
     public double? Threshold { get; set; }
     public string ProcessedAt { get; set; } = "";
     public string? Error { get; set; }
+    /// <summary>视频源到达文件末尾；连续运行应正常退出，不再派发最后一帧。</summary>
+    public bool EndOfStream { get; set; }
     /// <summary>节点名 → 该节点输出值（供 UI 展示每模型 score）。</summary>
     public Dictionary<string, Dictionary<string, string>> NodeValues { get; } = new();
     /// <summary>PatchCore 热图（若有）。</summary>
@@ -68,6 +70,8 @@ public sealed class Pipeline : IDisposable
                 case SaveImageNode s: s.Log = _log; break;
                 case CameraIoNode c: c.Log = _log; break;
                 case ImageSourceNode isrc: isrc.Log = _log; break;
+                case VideoSourceNode video: video.Log = _log; break;
+                case MultiObjectTrackingNode tracking: tracking.Log = _log; break;
                 case BinarizeNode bz: bz.Log = _log; break;
                 case GeometryNode geo: geo.Log = _log; break;
                 case ColorTransformNode ct: ct.Log = _log; break;
@@ -150,6 +154,10 @@ public sealed class Pipeline : IDisposable
                     pc.EnsureLoaded(_recipe.BaseDir);
                     _log?.Invoke($"[校验] {node.Name}: 模型已加载: {pc.ResolvedModelDir}");
                     break;
+                case VideoSourceNode video:
+                    video.EnsureOpened(_recipe.BaseDir);
+                    _log?.Invoke($"[校验] {node.Name}: 已打开视频源: {video.ResolvedPath}");
+                    break;
                 case YoloNode yn:
                     yn.EnsureLoaded(_recipe.BaseDir);
                     _log?.Invoke($"[校验] {node.Name}: 模型已加载: {yn.ResolvedModelDir}");
@@ -174,7 +182,7 @@ public sealed class Pipeline : IDisposable
         }
         catch (Exception ex)
         {
-            var hint = node is YoloNode or SegNode or SemanticSegNode or ContourMatchNode or CharRecNode ? "「模型目录」" : "「模型路径」";
+            var hint = node is VideoSourceNode ? "「视频文件」" : node is YoloNode or SegNode or SemanticSegNode or ContourMatchNode or CharRecNode ? "「模型目录」" : "「模型路径」";
             _log?.Invoke($"[校验] {node.Name}: 模型加载失败: {ex.Message}（请检查{hint}参数）");
         }
     }
@@ -182,6 +190,12 @@ public sealed class Pipeline : IDisposable
     /// <summary>运行整条流水线。返回最终结果；任一启用节点异常 → 整线判定 ERROR。
     /// sourceOverrides：外部注入指定节点的输出图（通常是图像源节点，用于打分目录走与检测完全相同的链路）；
     /// 命中的图像源节点跳过自身取图，注入的 Mat 所有权归 Run（与 bgr 同实例则由调用方释放）。</summary>
+    /// <summary>一次新播放启动时仅重置已经播放完毕的视频源，保留中途暂停的游标。</summary>
+    public void RestartCompletedVideoSources()
+    {
+        foreach (var source in _nodes.OfType<VideoSourceNode>()) source.RestartIfFinished();
+    }
+
     public PipelineResult Run(
         Mat bgr,
         string imageName,
@@ -267,7 +281,12 @@ public sealed class Pipeline : IDisposable
                 {
                     ranModelNode = true;
                 }
-                _log?.Invoke($"[流水线] {node.Name}: {string.Join(",", nr.Values.Select(kv => $"{kv.Key}={kv.Value}"))}");
+                _log?.Invoke($"[流水线] {node.Name}: {string.Join(",", nr.Values.Where(kv => !kv.Key.EndsWith("_json", StringComparison.Ordinal)).Select(kv => $"{kv.Key}={kv.Value}"))}");
+                if (node is VideoSourceNode && nr.Values.GetValueOrDefault("eof") == "true")
+                {
+                    result.EndOfStream = true;
+                    break; // EOF 不运行下游，避免最后一帧被重复统计。
+                }
             }
             catch (Exception ex)
             {
@@ -276,6 +295,7 @@ public sealed class Pipeline : IDisposable
                 _log?.Invoke($"[流水线] {node.Name} 异常: {ex.Message}");
                 // 任一启用节点出错 → 决策覆写为 ERROR（不能静默回退 OK 放行）
                 _nodeFailed = true;
+                if (node is VideoSourceNode) break;
             }
         }
 
@@ -398,7 +418,7 @@ public sealed class Pipeline : IDisposable
             if (nr.Annotations.Count > 0) result.NodeAnnotations[name] = nr.Annotations;
             if (nr.Threshold is { } th && result.NodeThreshold == null) result.NodeThreshold = th;
             if (nr.HeatMap != null) result.HeatMap = nr.HeatMap;
-            _log?.Invoke($"[流水线] {name}: {string.Join(",", nr.Values.Select(kv => $"{kv.Key}={kv.Value}"))}");
+            _log?.Invoke($"[流水线] {name}: {string.Join(",", nr.Values.Where(kv => !kv.Key.EndsWith("_json", StringComparison.Ordinal)).Select(kv => $"{kv.Key}={kv.Value}"))}");
         }
 
         // 阶段2：按序串行跑判断/保存节点（依赖阶段1结果）。
@@ -431,7 +451,7 @@ public sealed class Pipeline : IDisposable
                 if (nr.Threshold is { } th && result.NodeThreshold == null) result.NodeThreshold = th;
                 if (nr.HeatMap != null) result.HeatMap = nr.HeatMap;
                 if (node is DecisionNode) ctx.DecisionResult = nr;
-                _log?.Invoke($"[流水线] {node.Name}: {string.Join(",", nr.Values.Select(kv => $"{kv.Key}={kv.Value}"))}");
+                _log?.Invoke($"[流水线] {node.Name}: {string.Join(",", nr.Values.Where(kv => !kv.Key.EndsWith("_json", StringComparison.Ordinal)).Select(kv => $"{kv.Key}={kv.Value}"))}");
             }
             catch (Exception ex)
             {
@@ -469,7 +489,7 @@ public sealed class Pipeline : IDisposable
             result.NodeImages[node.Name] = img;
             images.Remove(node.Name);
             lastName = node.Name;
-            if (node is OverlayDisplayNode) lastOverlayName = node.Name;
+            if (node is OverlayDisplayNode or MultiObjectTrackingNode) lastOverlayName = node.Name;
             if (IsModelNode(node)) lastModelName = node.Name;
         }
 
@@ -503,7 +523,7 @@ public sealed class Pipeline : IDisposable
 
     private static bool IsModelNode(IModelNode node) =>
         node is not DecisionNode and not SaveImageNode and not DisplayNode and not CameraIoNode
-        and not ImageSourceNode and not BinarizeNode and not GeometryNode and not KeyControlNode
+        and not ImageSourceNode and not VideoSourceNode and not MultiObjectTrackingNode and not BinarizeNode and not GeometryNode and not KeyControlNode
         and not SendDataNode and not ReceiveDataNode and not LineFindNode and not CircleFindNode
         and not MeasureNodeBase and not OverlayDisplayNode;
 

@@ -248,6 +248,8 @@ public sealed class YoloNode : IModelNode
         }
         nodeResult.Values["count"] = triggered.Count.ToString();
         nodeResult.Values["det_all"] = detections.Count.ToString();
+        // 通用跟踪节点读取所有候选框；不依赖工业 OK/NG 语义和 ROI 触发集合。
+        nodeResult.Values["detections_json"] = System.Text.Json.JsonSerializer.Serialize(detections);
         nodeResult.Values["classes"] = string.Join(",", triggered.Select(d => d.Class).Distinct());
         nodeResult.Values["max_conf"] = triggered.Count > 0 ? triggered.Max(d => d.Conf).ToString("F3") : "0.000";
         foreach (var (name, n) in perRoiCounts)

@@ -40,6 +40,15 @@ public sealed class PipelineRunner : IDisposable
         BeginRun(continuous: false);
         try
         {
+            pipeline.RestartCompletedVideoSources();
+        }
+        catch
+        {
+            EndRun();
+            throw;
+        }
+        try
+        {
             using var input = new Mat();
             var result = await Task.Run(
                 () => pipeline.Run(input, imageName, null, cameraIoOutput, null, commRuntime));
@@ -71,6 +80,7 @@ public sealed class PipelineRunner : IDisposable
                 throw new InvalidOperationException("已有执行在进行中");
             }
 
+            pipeline.RestartCompletedVideoSources();
             IsRunning = true;
             IsContinuous = true;
             var cts = new CancellationTokenSource();
@@ -97,6 +107,7 @@ public sealed class PipelineRunner : IDisposable
                         }
 
                         Completed?.Invoke(result);
+                        if (result.EndOfStream) break; // 视频源正常结束，不再无效循环。
                         try
                         {
                             await Task.Delay(1, ct);
