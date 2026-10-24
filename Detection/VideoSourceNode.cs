@@ -169,6 +169,11 @@ public sealed class VideoSourceNode : IModelNode
         return result;
     }
 
+    public void RestartIfFinished()
+    {
+        if (_endOfStream) CloseCapture();
+    }
+
     private void CloseCapture()
     {
         _capture?.Dispose();
